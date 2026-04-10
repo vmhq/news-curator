@@ -2,7 +2,7 @@ import { Hono } from "hono";
 import { serveStatic } from "hono/bun";
 import { marked, Renderer } from "marked";
 import { readdir, readFile } from "fs/promises";
-import { existsSync } from "fs";
+import { existsSync, watch } from "fs";
 import { join } from "path";
 
 function escapeHtml(str: string): string {
@@ -28,10 +28,41 @@ const SITE_URL = "https://dailyb.vmhq.cl";
 app.use("/static/*", serveStatic({ root: "./", rewriteRequestPath: (p) => p.replace("/static/", "public/") }));
 app.get("/robots.txt", (c) => c.text("User-agent: *\nDisallow: /\n", 200, { "Content-Type": "text/plain" }));
 
+// ── In-memory caches ──────────────────────────────────────────────────────────
+let filesCache: string[] | null = null;
+const summaryCache = new Map<string, string>();
+const ogImageCache = new Map<string, string | null>();
+
+function startDirWatcher() {
+  if (!existsSync(CURATIONS_DIR)) return;
+  watch(CURATIONS_DIR, (_event: string, filename: string | null) => {
+    filesCache = null;
+    if (filename) {
+      summaryCache.delete(filename.replace(/\.md$/, ""));
+    } else {
+      summaryCache.clear();
+    }
+    // OG image cache is URL-keyed and doesn't change when files change
+  });
+}
+startDirWatcher();
+// ─────────────────────────────────────────────────────────────────────────────
+
 async function getCurationFiles(): Promise<string[]> {
+  if (filesCache) return filesCache;
   if (!existsSync(CURATIONS_DIR)) return [];
   const files = await readdir(CURATIONS_DIR);
-  return files.filter((f) => f.endsWith(".md")).map((f) => f.replace(".md", "")).sort().reverse();
+  const sorted = files.filter((f: string) => f.endsWith(".md")).map((f: string) => f.replace(".md", "")).sort().reverse();
+  filesCache = sorted;
+  return sorted;
+}
+
+async function getCachedSummary(date: string): Promise<string> {
+  if (summaryCache.has(date)) return summaryCache.get(date)!;
+  const fc = await readFile(join(CURATIONS_DIR, `${date}.md`), "utf-8");
+  const summary = getSummary(fc);
+  summaryCache.set(date, summary);
+  return summary;
 }
 
 async function readCuration(date: string): Promise<{ raw: string; html: string; coverImage: string | null } | null> {
@@ -147,8 +178,10 @@ function isGoodOgImage(imgUrl: string): boolean {
   return true;
 }
 
-// Try to extract og:image from a URL (with timeout)
+// Try to extract og:image from a URL (with timeout, 50KB limit, cached)
 async function extractOgImage(url: string): Promise<string | null> {
+  if (ogImageCache.has(url)) return ogImageCache.get(url)!;
+  let result: string | null = null;
   try {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 5000);
@@ -157,19 +190,35 @@ async function extractOgImage(url: string): Promise<string | null> {
       headers: { "User-Agent": "Mozilla/5.0 (compatible; DailyBrief/1.0)" },
     });
     clearTimeout(timeout);
-    const html = await resp.text();
+    // Read at most 50KB — og/twitter tags are always in <head>
+    const reader = resp.body?.getReader();
+    let html = "";
+    if (reader) {
+      const decoder = new TextDecoder();
+      let bytesRead = 0;
+      while (bytesRead < 50 * 1024) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        html += decoder.decode(value, { stream: true });
+        bytesRead += value.length;
+      }
+      reader.cancel();
+    }
     // Try og:image
     const ogMatch = html.match(/<meta[^>]*property=["']og:image["'][^>]*content=["']([^"']+)["']/i) ||
                     html.match(/<meta[^>]*content=["']([^"']+)["'][^>]*property=["']og:image["']/i);
-    if (ogMatch && isGoodOgImage(ogMatch[1])) return ogMatch[1];
-    // Try twitter:image
-    const twMatch = html.match(/<meta[^>]*name=["']twitter:image["'][^>]*content=["']([^"']+)["']/i) ||
-                    html.match(/<meta[^>]*content=["']([^"']+)["'][^>]*name=["']twitter:image["']/i);
-    if (twMatch && isGoodOgImage(twMatch[1])) return twMatch[1];
-    return null;
+    if (ogMatch && isGoodOgImage(ogMatch[1])) { result = ogMatch[1]; }
+    else {
+      // Try twitter:image
+      const twMatch = html.match(/<meta[^>]*name=["']twitter:image["'][^>]*content=["']([^"']+)["']/i) ||
+                      html.match(/<meta[^>]*content=["']([^"']+)["'][^>]*name=["']twitter:image["']/i);
+      if (twMatch && isGoodOgImage(twMatch[1])) result = twMatch[1];
+    }
   } catch {
-    return null;
+    // best-effort
   }
+  ogImageCache.set(url, result);
+  return result;
 }
 
 function buildPage(title: string, body: string, meta: {
@@ -361,10 +410,7 @@ app.get("/", async (c) => {
   const sidebarHasPrev = sidebarPage > 1;
 
   const recentCurations = await Promise.all(
-    sidebarFiles.map(async (d) => {
-      const fc = await readFile(join(CURATIONS_DIR, `${d}.md`), "utf-8");
-      return { date: d, summary: getSummary(fc) };
-    })
+    sidebarFiles.map(async (d) => ({ date: d, summary: await getCachedSummary(d) }))
   );
 
   const idx = files.indexOf(targetDate);
@@ -409,10 +455,7 @@ app.get("/curacion/:date", async (c) => {
 
   const allEditions = allEditionsSidebar(files);
   const recentCurations = await Promise.all(
-    allEditions.slice(0, 8).map(async (d) => {
-      const fc = await readFile(join(CURATIONS_DIR, `${d}.md`), "utf-8");
-      return { date: d, summary: getSummary(fc) };
-    })
+    allEditions.slice(0, 8).map(async (d) => ({ date: d, summary: await getCachedSummary(d) }))
   );
 
   const idx = files.indexOf(date);
@@ -430,10 +473,7 @@ app.get("/curacion/:date", async (c) => {
 app.get("/ediciones", async (c) => {
   const files = await getCurationFiles();
   const allCurations = await Promise.all(
-    files.map(async (d) => {
-      const fc = await readFile(join(CURATIONS_DIR, `${d}.md`), "utf-8");
-      return { date: d, summary: getSummary(fc) };
-    })
+    files.map(async (d) => ({ date: d, summary: await getCachedSummary(d) }))
   );
 
   const listHtml = allCurations.length ? allCurations.map((cur) => `
@@ -456,10 +496,7 @@ app.get("/api/curations", async (c) => {
   const start = (page - 1) * limit;
   const paginated = files.slice(start, start + limit);
   const curations = await Promise.all(
-    paginated.map(async (d) => {
-      const fc = await readFile(join(CURATIONS_DIR, `${d}.md`), "utf-8");
-      return { date: d, summary: getSummary(fc) };
-    })
+    paginated.map(async (d) => ({ date: d, summary: await getCachedSummary(d) }))
   );
   return c.json({ curations, total: files.length, page, totalPages: Math.ceil(files.length / limit) });
 });
@@ -468,25 +505,26 @@ app.get("/api/search", async (c) => {
   const query = c.req.query("q")?.slice(0, 200).toLowerCase();
   if (!query || query.length < 2) return c.json({ results: [] });
   const files = await getCurationFiles();
-  const results: Array<{ date: string; snippet: string; summary: string }> = [];
-  for (const date of files) {
-    const fc = await readFile(join(CURATIONS_DIR, `${date}.md`), "utf-8");
-    const lower = fc.toLowerCase();
-    const idx = lower.indexOf(query);
-    if (idx !== -1) {
+  const safeQuery = query.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const matches = await Promise.all(
+    files.map(async (date) => {
+      const fc = await readFile(join(CURATIONS_DIR, `${date}.md`), "utf-8");
+      const lower = fc.toLowerCase();
+      const idx = lower.indexOf(query);
+      if (idx === -1) return null;
       const start = Math.max(0, idx - 60);
       const end = Math.min(fc.length, idx + query.length + 60);
       let snippet = fc.slice(start, end).replace(/\n/g, " ").trim();
       if (start > 0) snippet = "..." + snippet;
       if (end < fc.length) snippet += "...";
       snippet = escapeHtml(snippet);
-      const highlighted = snippet.replace(
-        new RegExp(`(${query.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")})`, "gi"),
-        "<mark>$1</mark>"
-      );
-      results.push({ date, snippet: highlighted, summary: getSummary(fc) });
-    }
-  }
+      const highlighted = snippet.replace(new RegExp(`(${safeQuery})`, "gi"), "<mark>$1</mark>");
+      const summary = getSummary(fc);
+      summaryCache.set(date, summary); // populate cache while we have the content
+      return { date, snippet: highlighted, summary };
+    })
+  );
+  const results = matches.filter(Boolean);
   return c.json({ results, query });
 });
 
