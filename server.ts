@@ -287,7 +287,7 @@ app.get("/api/search", async (c) => {
 
 // ─────────────────────────────────────────────────────────────────────────────
 
-const port = parseInt(process.env.PORT || "8080");
+const port = parseInt(process.env.PORT || "8391");
 console.log(`📋 Daily Brief corriendo en http://localhost:${port}`);
 
 export default { port, fetch: app.fetch };

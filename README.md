@@ -22,7 +22,7 @@ cp .env.example .env
 docker compose up -d
 
 # 3. Verificar
-curl http://localhost:8080/health
+curl http://localhost:8391/health
 ```
 
 **`docker-compose.yml`**
@@ -32,15 +32,15 @@ services:
     build: .
     restart: unless-stopped
     ports:
-      - "${PORT:-8080}:8080"
+      - "${PORT:-8391}:8391"
     environment:
-      PORT: "8080"
+      PORT: "8391"
       API_KEY: "${API_KEY}"
       CURATIONS_DIR: "/data/curations"
     volumes:
       - curations:/data/curations
     healthcheck:
-      test: ["CMD", "wget", "-qO-", "http://localhost:8080/health"]
+      test: ["CMD", "wget", "-qO-", "http://localhost:8391/health"]
       interval: 30s
       timeout: 5s
       retries: 3
@@ -53,7 +53,7 @@ volumes:
 **`.env`**
 ```bash
 # Puerto expuesto al host
-PORT=8080
+PORT=8391
 
 # API key para POST /api/publish — debe ser un valor secreto
 # Generar con: openssl rand -hex 32

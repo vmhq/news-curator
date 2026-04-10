@@ -11,6 +11,6 @@ COPY . .
 # Data directory
 RUN mkdir -p /data/curations
 
-EXPOSE 8080
+EXPOSE 8391
 
 CMD ["bun", "run", "server.ts"]

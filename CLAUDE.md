@@ -7,10 +7,10 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ```bash
 bun install        # Install dependencies
 bun run server.ts  # Start the server (also: bun run dev / bun run start)
-PORT=3000 bun run server.ts  # Custom port (default: 8080)
+PORT=3000 bun run server.ts  # Custom port (default: 8391)
 ```
 
-Server runs on `http://localhost:8080`. There are no tests or linting configured.
+Server runs on `http://localhost:8391`. There are no tests or linting configured.
 
 ## Architecture
 
