@@ -5,6 +5,15 @@ import { readdir, readFile } from "fs/promises";
 import { existsSync } from "fs";
 import { join } from "path";
 
+function escapeHtml(str: string): string {
+  return str
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
 // Custom renderer: open links in new tab
 const renderer = new Renderer();
 renderer.link = function({ href, text }: { href: string; text: string }) {
@@ -179,9 +188,9 @@ function buildPage(title: string, body: string, meta: {
   const ogImage = heroImage ?? DEFAULT_COVER;
 
   const recentLinks = recentCurations.map((c) =>
-    `<a href="/curacion/${c.date}" class="recent-item${c.date === date ? " active" : ""}">
-      <span class="recent-date">${formatDateEs(c.date)}</span>
-      <span class="recent-headline">${c.summary}</span>
+    `<a href="/curacion/${escapeHtml(c.date)}" class="recent-item${c.date === date ? " active" : ""}">
+      <span class="recent-date">${escapeHtml(formatDateEs(c.date))}</span>
+      <span class="recent-headline">${escapeHtml(c.summary)}</span>
     </a>`
   ).join("\n");
 
@@ -193,21 +202,21 @@ function buildPage(title: string, body: string, meta: {
 
   const navHtml = (prevDate || nextDate) ? `
     <div class="pagination">
-      ${prevDate ? `<a href="/curacion/${prevDate}" class="page-btn">← Anterior</a>` : '<span class="page-btn disabled">← Anterior</span>'}
-      ${nextDate ? `<a href="/curacion/${nextDate}" class="page-btn">Siguiente →</a>` : '<span class="page-btn disabled">Siguiente →</span>'}
+      ${prevDate ? `<a href="/curacion/${escapeHtml(prevDate)}" class="page-btn">← Anterior</a>` : '<span class="page-btn disabled">← Anterior</span>'}
+      ${nextDate ? `<a href="/curacion/${escapeHtml(nextDate)}" class="page-btn">Siguiente →</a>` : '<span class="page-btn disabled">Siguiente →</span>'}
     </div>` : "";
 
   const heroImageHtml = heroImage
-    ? `<div class="hero-image"><img src="${heroImage}" alt="${featured?.headline || ''}" loading="eager" onerror="this.parentElement.innerHTML='<div class=\\'hero-image-placeholder\\'><span class=\\'hero-emoji\\'>📰</span></div>'"></div>`
+    ? `<div class="hero-image"><img src="${escapeHtml(heroImage)}" alt="${escapeHtml(featured?.headline || '')}" loading="eager" onerror="this.parentElement.innerHTML='<div class=\\'hero-image-placeholder\\'><span class=\\'hero-emoji\\'>📰</span></div>'"></div>`
     : featured ? `<div class="hero-image"><div class="hero-image-placeholder"><span class="hero-emoji">📰</span></div></div>` : '';
 
   const heroHtml = featured ? `
     <section class="hero">
       ${heroImageHtml}
       <div class="hero-content">
-        <span class="hero-category">${featured.category}</span>
-        <h1 class="hero-headline">${featured.headline}</h1>
-        <p class="hero-excerpt">${featured.body}</p>
+        <span class="hero-category">${escapeHtml(featured.category)}</span>
+        <h1 class="hero-headline">${escapeHtml(featured.headline)}</h1>
+        <p class="hero-excerpt">${escapeHtml(featured.body)}</p>
         <div class="hero-meta">
           ${date ? `<span>${formatDateEs(date)}</span>` : ""}
           ${generatedAt ? `<span class="hero-dot">·</span><span>${generatedAt}</span>` : ""}
@@ -222,21 +231,21 @@ function buildPage(title: string, body: string, meta: {
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <meta name="robots" content="noindex, nofollow">
   <meta name="googlebot" content="noindex, nofollow">
-  <title>${title}</title>
+  <title>${escapeHtml(title)}</title>
   <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
-  <link rel="canonical" href="${canonicalUrl}">
+  <link rel="canonical" href="${escapeHtml(canonicalUrl)}">
   <!-- Open Graph -->
   <meta property="og:type" content="website">
   <meta property="og:site_name" content="Daily Brief">
-  <meta property="og:url" content="${canonicalUrl}">
-  <meta property="og:title" content="${title}">
-  <meta property="og:description" content="${ogDescription}">
-  <meta property="og:image" content="${ogImage}">
+  <meta property="og:url" content="${escapeHtml(canonicalUrl)}">
+  <meta property="og:title" content="${escapeHtml(title)}">
+  <meta property="og:description" content="${escapeHtml(ogDescription)}">
+  <meta property="og:image" content="${escapeHtml(ogImage)}">
   <!-- Twitter -->
   <meta name="twitter:card" content="summary_large_image">
-  <meta name="twitter:title" content="${title}">
-  <meta name="twitter:description" content="${ogDescription}">
-  <meta name="twitter:image" content="${ogImage}">
+  <meta name="twitter:title" content="${escapeHtml(title)}">
+  <meta name="twitter:description" content="${escapeHtml(ogDescription)}">
+  <meta name="twitter:image" content="${escapeHtml(ogImage)}">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
@@ -371,6 +380,9 @@ app.get("/", async (c) => {
 
 app.get("/curacion/:date", async (c) => {
   const date = c.req.param("date");
+  if (!/^\d{4}-\d{2}-\d{2}(_\d{2}-\d{2})?$/.test(date)) {
+    return c.text("Fecha inválida", 400);
+  }
   const files = await getCurationFiles();
   const curation = await readCuration(date);
 
@@ -380,7 +392,7 @@ app.get("/curacion/:date", async (c) => {
       <div class="empty-state">
         <div class="empty-icon">🔍</div>
         <h2>Edición no encontrada</h2>
-        <p>No existe curación para <strong>${date}</strong>.</p>
+        <p>No existe curación para <strong>${escapeHtml(date)}</strong>.</p>
         <a href="/" class="back-link">← Volver a hoy</a>
       </div>
     `, { recentCurations: allEditions.slice(0, 8).map((d) => ({ date: d, summary: d })) }));
@@ -439,8 +451,8 @@ app.get("/ediciones", async (c) => {
 
 app.get("/api/curations", async (c) => {
   const files = await getCurationFiles();
-  const page = parseInt(c.req.query("page") || "1");
-  const limit = parseInt(c.req.query("limit") || "10");
+  const page = Math.max(1, Math.min(1000, parseInt(c.req.query("page") || "1")));
+  const limit = Math.max(1, Math.min(50, parseInt(c.req.query("limit") || "10")));
   const start = (page - 1) * limit;
   const paginated = files.slice(start, start + limit);
   const curations = await Promise.all(
@@ -453,7 +465,7 @@ app.get("/api/curations", async (c) => {
 });
 
 app.get("/api/search", async (c) => {
-  const query = c.req.query("q")?.toLowerCase();
+  const query = c.req.query("q")?.slice(0, 200).toLowerCase();
   if (!query || query.length < 2) return c.json({ results: [] });
   const files = await getCurationFiles();
   const results: Array<{ date: string; snippet: string; summary: string }> = [];
@@ -467,6 +479,7 @@ app.get("/api/search", async (c) => {
       let snippet = fc.slice(start, end).replace(/\n/g, " ").trim();
       if (start > 0) snippet = "..." + snippet;
       if (end < fc.length) snippet += "...";
+      snippet = escapeHtml(snippet);
       const highlighted = snippet.replace(
         new RegExp(`(${query.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")})`, "gi"),
         "<mark>$1</mark>"
