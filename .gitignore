@@ -1,5 +1,7 @@
 node_modules/
 .env
 *.log
-.claude/
+.claude/*
+!.claude/commands/
+!.claude/commands/*.md
 .mcp.json

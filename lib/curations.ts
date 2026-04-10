@@ -3,7 +3,8 @@ import { existsSync, watch } from "fs";
 import { join } from "path";
 import { marked, Renderer } from "marked";
 
-export const CURATIONS_DIR = "/home/ai/llm-wiki/raw/curations";
+export const CURATIONS_DIR =
+  process.env.CURATIONS_DIR ?? "/home/ai/llm-wiki/raw/curations";
 export const SITE_URL = "https://dailyb.vmhq.cl";
 export const DEFAULT_COVER = `${SITE_URL}/static/cover.svg`;
 const TZ = "America/Santiago";
@@ -31,6 +32,10 @@ marked.use({ renderer });
 let filesCache: string[] | null = null;
 const summaryCache = new Map<string, string>();
 const ogImageCache = new Map<string, string | null>();
+
+export function invalidateFilesCache() {
+  filesCache = null;
+}
 
 export function startDirWatcher() {
   if (!existsSync(CURATIONS_DIR)) return;

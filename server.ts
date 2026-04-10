@@ -1,6 +1,6 @@
 import { Hono } from "hono";
 import { serveStatic } from "hono/bun";
-import { readFile } from "fs/promises";
+import { readFile, writeFile, mkdir } from "fs/promises";
 import { join } from "path";
 import {
   CURATIONS_DIR,
@@ -16,6 +16,7 @@ import {
   dateFromFileId,
   todayLocal,
   formatDateEs,
+  invalidateFilesCache,
 } from "./lib/curations.ts";
 import { buildPage, escapeHtml } from "./templates/layout.ts";
 
@@ -25,6 +26,54 @@ app.use("/static/*", serveStatic({ root: "./", rewriteRequestPath: (p) => p.repl
 app.get("/robots.txt", (c) => c.text("User-agent: *\nDisallow: /\n", 200, { "Content-Type": "text/plain" }));
 
 app.get("/health", (c) => c.json({ status: "ok", uptime: process.uptime() }));
+
+// ── Publish API ───────────────────────────────────────────────────────────────
+
+const API_KEY = process.env.API_KEY;
+if (!API_KEY) console.warn("⚠️  API_KEY not set — POST /api/publish is disabled");
+
+app.use("/api/publish", async (c, next) => {
+  if (!API_KEY) return c.json({ error: "Publish endpoint disabled: API_KEY not configured" }, 503);
+  const key =
+    c.req.header("X-Api-Key") ??
+    c.req.header("Authorization")?.replace(/^Bearer\s+/i, "");
+  if (!key || key !== API_KEY) return c.json({ error: "Unauthorized" }, 401);
+  await next();
+});
+
+app.post("/api/publish", async (c) => {
+  let content: string;
+  const ct = c.req.header("Content-Type") ?? "";
+  if (ct.includes("application/json")) {
+    const body = await c.req.json();
+    if (typeof body.content !== "string") return c.json({ error: "Missing 'content' field" }, 400);
+    content = body.content;
+  } else {
+    content = await c.req.text();
+  }
+
+  if (content.length < 10 || content.length > 1_000_000) {
+    return c.json({ error: "Content length out of range (10–1_000_000 chars)" }, 400);
+  }
+
+  // Generate edition ID from current time in Santiago TZ
+  const now = new Date();
+  const tz = "America/Santiago";
+  const date = now.toLocaleDateString("sv-SE", { timeZone: tz });
+  const time = now
+    .toLocaleTimeString("sv-SE", { timeZone: tz, hour: "2-digit", minute: "2-digit" })
+    .replace(":", "-");
+  const editionId = `${date}_${time}`;
+  const filePath = join(CURATIONS_DIR, `${editionId}.md`);
+
+  await mkdir(CURATIONS_DIR, { recursive: true });
+  await writeFile(filePath, content, "utf-8");
+  invalidateFilesCache();
+
+  return c.json({ success: true, edition: editionId, url: `/curacion/${editionId}` }, 201);
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
 
 startDirWatcher();
 

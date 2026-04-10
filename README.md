@@ -1,6 +1,6 @@
 # Daily Brief
 
-Aplicación web de curación de noticias de tecnología e IA, generadas y servidas diariamente. Acceso privado — no indexada por buscadores.
+Aplicación web de curación de noticias de tecnología e IA, publicadas diariamente por un agente AI. Acceso privado — no indexada por buscadores.
 
 **URL:** https://dailyb.vmhq.cl
 
@@ -8,81 +8,137 @@ Aplicación web de curación de noticias de tecnología e IA, generadas y servid
 
 - **Runtime:** [Bun](https://bun.sh)
 - **Framework:** [Hono](https://hono.dev)
-- **Renderizado:** HTML server-side puro, sin build step
-- **Tipografía:** Inter (Google Fonts)
-- **Fuente de datos:** archivos Markdown en `/home/ai/llm-wiki/raw/curations/`
+- **Renderizado:** HTML server-side, sin build step
+- **Contenido:** archivos Markdown en `/data/curations/` (volumen Docker)
 
-## Comandos
+## Despliegue con Docker
 
 ```bash
-bun install        # Instalar dependencias
-bun run server.ts  # Iniciar servidor en http://localhost:8080
-PORT=3000 bun run server.ts  # Puerto personalizado
+# 1. Configurar variables de entorno
+cp .env.example .env
+# Editar .env — cambiar API_KEY por un valor seguro:
+#   openssl rand -hex 32
+
+# 2. Levantar
+docker compose up -d
+
+# 3. Verificar
+curl http://localhost:8080/health
 ```
 
-## Estructura
+El contenido se almacena en el volumen Docker `curations` y persiste entre reinicios.
+
+### Variables de entorno
+
+| Variable | Descripción | Default |
+|----------|-------------|---------|
+| `PORT` | Puerto expuesto por el contenedor | `8080` |
+| `API_KEY` | Clave secreta para `POST /api/publish` | — (requerido) |
+| `CURATIONS_DIR` | Ruta interna a los archivos markdown | `/data/curations` |
+
+## Desarrollo local (sin Docker)
+
+```bash
+bun install
+bun run dev          # con hot-reload
+bun run start        # sin hot-reload
+PORT=3000 bun run start
+```
+
+## Estructura del proyecto
 
 ```
 news-curator/
-├── server.ts          # Servidor principal (rutas, parseo MD, HTML)
+├── server.ts              # Rutas y lógica principal
+├── lib/
+│   └── curations.ts       # I/O, caché, parsing, utilidades de fecha
+├── templates/
+│   └── layout.ts          # buildPage() — HTML completo
 ├── public/
-│   ├── style.css      # Estilos (light/dark, responsive, sky-blue)
-│   ├── app.js         # JS cliente (tema, búsqueda, menú móvil)
+│   ├── style.css          # Estilos (light/dark, responsive)
+│   ├── app.js             # JS cliente (tema, búsqueda, menú)
 │   ├── favicon.svg
-│   ├── cover.svg      # Imagen de portada por defecto (fallback hero)
-│   └── robots.txt     # Bloqueo de indexación (Disallow: /)
-├── CLAUDE.md          # Instrucciones para Claude Code
-├── package.json
-└── README.md
+│   └── cover.svg          # Imagen de portada fallback
+├── .claude/
+│   └── commands/
+│       └── curar.md       # Skill del agente AI para publicar ediciones
+├── CURATION_SPEC.md       # Especificación completa del formato markdown
+├── CLAUDE.md              # Instrucciones para Claude Code
+├── Dockerfile
+├── docker-compose.yml
+└── .env.example
 ```
 
-## Fuente de datos
+## Rutas HTTP
 
-Los archivos de curación se leen desde `/home/ai/llm-wiki/raw/curations/` en cada request. Sin caché ni base de datos.
+| Método | Ruta | Descripción |
+|--------|------|-------------|
+| `GET` | `/` | Edición más reciente; `?p=N` pagina el sidebar |
+| `GET` | `/curacion/:date` | Edición por ID (`YYYY-MM-DD` o `YYYY-MM-DD_HH-MM`) |
+| `GET` | `/ediciones` | Lista completa de ediciones |
+| `GET` | `/api/curations` | JSON paginado (`?page=&limit=`) |
+| `GET` | `/api/search` | Búsqueda full-text (`?q=`) |
+| `GET` | `/health` | Estado del servidor |
+| `POST` | `/api/publish` | Publicar nueva edición (requiere `X-Api-Key`) |
 
-**Nombres de archivo soportados:**
-- `YYYY-MM-DD.md` — edición estándar
-- `YYYY-MM-DD_HH-MM.md` — múltiples ediciones por día (la más reciente se muestra primero)
+## API de publicación
 
-**Formato esperado del markdown:**
+Autenticación via header `X-Api-Key` o `Authorization: Bearer <key>`.
+
+**Publicar una edición:**
+
+```bash
+curl -X POST https://dailyb.vmhq.cl/api/publish \
+  -H "X-Api-Key: TU_API_KEY" \
+  -H "Content-Type: text/markdown" \
+  --data-binary @curación.md
 ```
----
-image_url: https://...   ← portada personalizada (opcional)
----
-# Título
-*Generado ...*
----
-## 🔥 Featured Story: TITULAR   ← hero + se renderiza también en el cuerpo
-...
-## Sección
-### Ítem con [enlace](url)
+
+**Respuesta:**
+```json
+{ "success": true, "edition": "2026-04-09_14-30", "url": "/curacion/2026-04-09_14-30" }
 ```
 
-**Prioridad de imagen hero:** `image_url` en frontmatter → og:image extraído del artículo destacado → `cover.svg` por defecto
+La edición se publica de inmediato — sin reiniciar el servidor.
 
-## Rutas
+Ver [`CURATION_SPEC.md`](./CURATION_SPEC.md) para el formato completo del archivo markdown y [``.claude/commands/curar.md``](./.claude/commands/curar.md) para el skill del agente.
 
-| Ruta | Descripción |
-|------|-------------|
-| `GET /` | Edición más reciente de hoy (o la última disponible); `?p=N` pagina el sidebar (8/página) |
-| `GET /curacion/:date` | Edición específica (soporta `YYYY-MM-DD` y `YYYY-MM-DD_HH-MM`) |
-| `GET /ediciones` | Lista completa — sin sidebar, layout centrado |
-| `GET /api/curations?page=&limit=` | JSON paginado de ediciones |
-| `GET /api/search?q=` | Búsqueda full-text en todos los markdown |
-| `GET /robots.txt` | `Disallow: /` — bloqueo total de indexación |
+## Formato del contenido
+
+Los archivos siguen la convención `YYYY-MM-DD_HH-MM.md`. Estructura esperada:
+
+```markdown
+---
+image_url: https://...        ← imagen hero (opcional)
+---
+# Título de la edición
+*Generado el ...*
+---
+## 🔥 Featured Story: TITULAR  ← noticia principal (hero + cuerpo)
+
+Primer párrafo con [enlace principal](https://url.com).
+
+---
+## Sección de Noticias
+
+### [Titular del artículo](https://url.com)
+Resumen de 2–3 oraciones.
+
+---
+## 🔗 Quick Links
+
+- **[Recurso](https://url.com)** — descripción breve.
+```
+
+Ver [`CURATION_SPEC.md`](./CURATION_SPEC.md) para la referencia completa.
 
 ## Características
 
-- HTML server-rendered — sin frameworks frontend
-- Múltiples ediciones por día con soporte de sufijo horario en el nombre de archivo
+- Múltiples ediciones por día con sufijo horario en el nombre de archivo
 - Timezone `America/Santiago` para determinar la edición del día
-- Imagen hero desde frontmatter, og:image del artículo, o portada por defecto
-- Filtrado de logos/iconos como imágenes de portada
+- Imagen hero desde frontmatter → og:image del artículo destacado → portada por defecto
+- Caché en memoria con invalidación automática vía watcher de directorio
 - Tema claro/oscuro (localStorage + `prefers-color-scheme`)
-- Búsqueda full-text con debounce (mínimo 2 caracteres)
-- Diseño responsivo (single column < 768px)
-- Texto del artículo justificado con `hyphens: auto`
-- Sidebar paginado en `/` (8 ediciones/página)
-- `/ediciones` usa layout sin sidebar, ancho máximo 860px
-- No indexable — `noindex, nofollow` + `robots.txt`
-- Puerto configurable via variable de entorno `PORT`
+- Búsqueda full-text con debounce
+- Sidebar paginado (8 ediciones/página)
+- No indexable — `noindex, nofollow` en todas las páginas
