@@ -16,8 +16,7 @@ Aplicación web de curación de noticias de tecnología e IA, publicadas diariam
 ```bash
 # 1. Configurar variables de entorno
 cp .env.example .env
-# Editar .env — cambiar API_KEY por un valor seguro:
-#   openssl rand -hex 32
+# Editar API_KEY con un valor seguro: openssl rand -hex 32
 
 # 2. Levantar
 docker compose up -d
@@ -26,15 +25,45 @@ docker compose up -d
 curl http://localhost:8080/health
 ```
 
+**`docker-compose.yml`**
+```yaml
+services:
+  app:
+    build: .
+    restart: unless-stopped
+    ports:
+      - "${PORT:-8080}:8080"
+    environment:
+      PORT: "8080"
+      API_KEY: "${API_KEY}"
+      CURATIONS_DIR: "/data/curations"
+    volumes:
+      - curations:/data/curations
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+volumes:
+  curations:
+```
+
+**`.env`**
+```bash
+# Puerto expuesto al host
+PORT=8080
+
+# API key para POST /api/publish — debe ser un valor secreto
+# Generar con: openssl rand -hex 32
+API_KEY=
+
+# Ruta a los archivos de curación (sobreescrita en docker-compose)
+# CURATIONS_DIR=/home/ai/llm-wiki/raw/curations
+```
+
 El contenido se almacena en el volumen Docker `curations` y persiste entre reinicios.
-
-### Variables de entorno
-
-| Variable | Descripción | Default |
-|----------|-------------|---------|
-| `PORT` | Puerto expuesto por el contenedor | `8080` |
-| `API_KEY` | Clave secreta para `POST /api/publish` | — (requerido) |
-| `CURATIONS_DIR` | Ruta interna a los archivos markdown | `/data/curations` |
 
 ## Desarrollo local (sin Docker)
 
