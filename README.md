@@ -29,7 +29,7 @@ curl http://localhost:8391/health
 ```yaml
 services:
   app:
-    build: .
+    image: ghcr.io/vmhq/news-curator:latest
     restart: unless-stopped
     ports:
       - "${PORT:-8391}:8391"
