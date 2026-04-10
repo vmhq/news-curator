@@ -109,12 +109,13 @@ news-curator/
 | `GET` | `/api/search` | Búsqueda full-text (`?q=`) |
 | `GET` | `/health` | Estado del servidor |
 | `POST` | `/api/publish` | Publicar nueva edición (requiere `X-Api-Key`) |
+| `PUT` | `/api/curations/:date` | Editar edición existente (requiere `X-Api-Key`) |
 
-## API de publicación
+## API de publicación y edición
 
 Autenticación via header `X-Api-Key` o `Authorization: Bearer <key>`.
 
-**Publicar una edición:**
+**Publicar nueva edición:**
 
 ```bash
 curl -X POST https://dailyb.vmhq.cl/api/publish \
@@ -123,14 +124,28 @@ curl -X POST https://dailyb.vmhq.cl/api/publish \
   --data-binary @curación.md
 ```
 
-**Respuesta:**
+**Respuesta (201):**
 ```json
 { "success": true, "edition": "2026-04-09_14-30", "url": "/curacion/2026-04-09_14-30" }
 ```
 
-La edición se publica de inmediato — sin reiniciar el servidor.
+**Editar edición existente:**
 
-Ver [`CURATION_SPEC.md`](./CURATION_SPEC.md) para el formato completo del archivo markdown y [``.claude/commands/curar.md``](./.claude/commands/curar.md) para el skill del agente.
+```bash
+curl -X PUT https://dailyb.vmhq.cl/api/curations/2026-04-09_14-30 \
+  -H "X-Api-Key: TU_API_KEY" \
+  -H "Content-Type: text/markdown" \
+  --data-binary @curación-corregida.md
+```
+
+**Respuesta (200):**
+```json
+{ "success": true, "edition": "2026-04-09_14-30", "url": "/curacion/2026-04-09_14-30" }
+```
+
+Ambos endpoints aceptan `Content-Type: text/markdown` (body raw) o `application/json` con campo `content`. Los cambios se publican de inmediato — el caché de resúmenes se invalida automáticamente.
+
+Ver [`CURATION_SPEC.md`](./CURATION_SPEC.md) para el formato completo del archivo markdown y [`.claude/commands/curar.md`](./.claude/commands/curar.md) para el skill del agente.
 
 ## Formato del contenido
 

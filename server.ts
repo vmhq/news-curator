@@ -1,6 +1,7 @@
 import { Hono } from "hono";
 import { serveStatic } from "hono/bun";
 import { readFile, writeFile, mkdir } from "fs/promises";
+import { existsSync } from "fs";
 import { join } from "path";
 import {
   CURATIONS_DIR,
@@ -17,6 +18,7 @@ import {
   todayLocal,
   formatDateEs,
   invalidateFilesCache,
+  invalidateSummaryCache,
 } from "./lib/curations.ts";
 import { buildPage, escapeHtml } from "./templates/layout.ts";
 
@@ -71,6 +73,48 @@ app.post("/api/publish", async (c) => {
   invalidateFilesCache();
 
   return c.json({ success: true, edition: editionId, url: `/curacion/${editionId}` }, 201);
+});
+
+app.use("/api/curations/:date", async (c, next) => {
+  // Only guard write methods; GET is public
+  if (c.req.method === "GET") return next();
+  if (!API_KEY) return c.json({ error: "Edit endpoint disabled: API_KEY not configured" }, 503);
+  const key =
+    c.req.header("X-Api-Key") ??
+    c.req.header("Authorization")?.replace(/^Bearer\s+/i, "");
+  if (!key || key !== API_KEY) return c.json({ error: "Unauthorized" }, 401);
+  await next();
+});
+
+app.put("/api/curations/:date", async (c) => {
+  const date = c.req.param("date");
+  if (!/^\d{4}-\d{2}-\d{2}(_\d{2}-\d{2})?$/.test(date)) {
+    return c.json({ error: "Invalid edition ID format" }, 400);
+  }
+
+  const filePath = join(CURATIONS_DIR, `${date}.md`);
+  if (!existsSync(filePath)) {
+    return c.json({ error: `Edition '${date}' not found` }, 404);
+  }
+
+  let content: string;
+  const ct = c.req.header("Content-Type") ?? "";
+  if (ct.includes("application/json")) {
+    const body = await c.req.json();
+    if (typeof body.content !== "string") return c.json({ error: "Missing 'content' field" }, 400);
+    content = body.content;
+  } else {
+    content = await c.req.text();
+  }
+
+  if (content.length < 10 || content.length > 1_000_000) {
+    return c.json({ error: "Content length out of range (10–1_000_000 chars)" }, 400);
+  }
+
+  await writeFile(filePath, content, "utf-8");
+  invalidateSummaryCache(date);
+
+  return c.json({ success: true, edition: date, url: `/curacion/${date}` });
 });
 
 // ─────────────────────────────────────────────────────────────────────────────

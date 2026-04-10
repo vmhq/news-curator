@@ -37,6 +37,10 @@ export function invalidateFilesCache() {
   filesCache = null;
 }
 
+export function invalidateSummaryCache(date: string) {
+  summaryCache.delete(date);
+}
+
 export function startDirWatcher() {
   if (!existsSync(CURATIONS_DIR)) return;
   watch(CURATIONS_DIR, (_event: string, filename: string | null) => {

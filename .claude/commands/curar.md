@@ -89,7 +89,7 @@ Resumen.
 
 ---
 
-## Publicar
+## Publicar nueva edición
 
 ```bash
 curl -X POST https://dailyb.vmhq.cl/api/publish \
@@ -117,6 +117,40 @@ curl -X POST https://dailyb.vmhq.cl/api/publish \
 ```
 
 La edición queda publicada inmediatamente en https://dailyb.vmhq.cl.
+
+---
+
+## Editar edición existente
+
+Usar el ID devuelto al publicar (o cualquier ID válido `YYYY-MM-DD` o `YYYY-MM-DD_HH-MM`):
+
+```bash
+curl -X PUT https://dailyb.vmhq.cl/api/curations/2026-04-09_14-30 \
+  -H "X-Api-Key: $DAILY_BRIEF_API_KEY" \
+  -H "Content-Type: text/markdown" \
+  --data-binary @curación-corregida.md
+```
+
+También como JSON:
+
+```bash
+curl -X PUT https://dailyb.vmhq.cl/api/curations/2026-04-09_14-30 \
+  -H "X-Api-Key: $DAILY_BRIEF_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d "{\"content\": \"$(cat curación-corregida.md | jq -Rs .)\"}"
+```
+
+**Respuesta exitosa (200):**
+```json
+{
+  "success": true,
+  "edition": "2026-04-09_14-30",
+  "url": "/curacion/2026-04-09_14-30"
+}
+```
+
+> `PUT` solo edita — no crea. Si el ID no existe, responde `404`.
+> El caché de resúmenes se invalida automáticamente al guardar.
 
 ---
 
