@@ -58,15 +58,34 @@ document.addEventListener("DOMContentLoaded", () => {
     try {
       const res = await fetch(`/api/search?q=${encodeURIComponent(q)}`);
       const data = await res.json();
-      if (!data.results.length) {
-        searchResults.innerHTML = '<div class="search-result"><span class="search-result-snippet">Sin resultados</span></div>';
+      searchResults.innerHTML = "";
+      if (!data.results || !data.results.length) {
+        const empty = document.createElement("div");
+        empty.className = "search-result";
+        const span = document.createElement("span");
+        span.className = "search-result-snippet";
+        span.textContent = "Sin resultados";
+        empty.appendChild(span);
+        searchResults.appendChild(empty);
       } else {
-        searchResults.innerHTML = data.results.map((r) => `
-          <a href="/curacion/${encodeURIComponent(r.date)}" class="search-result">
-            <span class="search-result-date">${esc(r.date)}</span>
-            <span class="search-result-snippet">${r.snippet}</span>
-          </a>
-        `).join("");
+        for (const r of data.results) {
+          const a = document.createElement("a");
+          a.href = `/curacion/${encodeURIComponent(r.date)}`;
+          a.className = "search-result";
+
+          const dateSpan = document.createElement("span");
+          dateSpan.className = "search-result-date";
+          dateSpan.textContent = r.date;
+
+          // snippet comes pre-escaped from server with only <mark> tags allowed
+          const snippetSpan = document.createElement("span");
+          snippetSpan.className = "search-result-snippet";
+          snippetSpan.innerHTML = r.snippet;
+
+          a.appendChild(dateSpan);
+          a.appendChild(snippetSpan);
+          searchResults.appendChild(a);
+        }
       }
       searchResults.classList.add("active");
     } catch (err) {

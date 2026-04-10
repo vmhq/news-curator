@@ -3,6 +3,7 @@ import { serveStatic } from "hono/bun";
 import { readFile, writeFile, mkdir } from "fs/promises";
 import { existsSync } from "fs";
 import { join } from "path";
+import { timingSafeEqual } from "node:crypto";
 import {
   CURATIONS_DIR,
   startDirWatcher,
@@ -12,6 +13,7 @@ import {
   getSummary,
   extractFeatured,
   extractOgImage,
+  isBlockedUrl,
   allEditionsSidebar,
   findTodayCuration,
   dateFromFileId,
@@ -34,12 +36,19 @@ app.get("/health", (c) => c.json({ status: "ok", uptime: process.uptime() }));
 const API_KEY = process.env.API_KEY;
 if (!API_KEY) console.warn("⚠️  API_KEY not set — POST /api/publish is disabled");
 
+/** Timing-safe API key check to prevent timing attacks. */
+function isValidApiKey(provided: string): boolean {
+  if (!API_KEY) return false;
+  if (provided.length !== API_KEY.length) return false;
+  return timingSafeEqual(Buffer.from(provided), Buffer.from(API_KEY));
+}
+
 app.use("/api/publish", async (c, next) => {
   if (!API_KEY) return c.json({ error: "Publish endpoint disabled: API_KEY not configured" }, 503);
   const key =
     c.req.header("X-Api-Key") ??
     c.req.header("Authorization")?.replace(/^Bearer\s+/i, "");
-  if (!key || key !== API_KEY) return c.json({ error: "Unauthorized" }, 401);
+  if (!key || !isValidApiKey(key)) return c.json({ error: "Unauthorized" }, 401);
   await next();
 });
 
@@ -82,6 +91,7 @@ app.post("/api/publish", async (c) => {
 
 /** HEAD-check image_url from frontmatter; returns a warning string or null. */
 async function validateImageUrl(url: string): Promise<string | null> {
+  if (isBlockedUrl(url)) return "image_url points to a blocked or internal address";
   try {
     const controller = new AbortController();
     setTimeout(() => controller.abort(), 3000);
@@ -120,7 +130,12 @@ function parseFrontmatter(content: string): { meta: Record<string, string>; body
 function serializeFrontmatter(meta: Record<string, string>, body: string): string {
   const entries = Object.entries(meta);
   if (entries.length === 0) return body;
-  const fm = entries.map(([k, v]) => `${k}: ${v}`).join("\n");
+  // Keys must be simple identifiers; values are quoted and newlines stripped to prevent injection
+  const fm = entries.map(([k, v]) => {
+    const safeKey = k.replace(/[^a-zA-Z0-9_-]/g, "");
+    const safeVal = String(v).replace(/[\r\n]/g, " ").replace(/"/g, "'");
+    return `${safeKey}: "${safeVal}"`;
+  }).join("\n");
   return `---\n${fm}\n---\n${body}`;
 }
 
@@ -133,7 +148,7 @@ app.use("/api/curations/:date", async (c, next) => {
   const key =
     c.req.header("X-Api-Key") ??
     c.req.header("Authorization")?.replace(/^Bearer\s+/i, "");
-  if (!key || key !== API_KEY) return c.json({ error: "Unauthorized" }, 401);
+  if (!key || !isValidApiKey(key)) return c.json({ error: "Unauthorized" }, 401);
   await next();
 });
 
@@ -189,7 +204,7 @@ app.use("/api/curations/:date/meta", async (c, next) => {
   const key =
     c.req.header("X-Api-Key") ??
     c.req.header("Authorization")?.replace(/^Bearer\s+/i, "");
-  if (!key || key !== API_KEY) return c.json({ error: "Unauthorized" }, 401);
+  if (!key || !isValidApiKey(key)) return c.json({ error: "Unauthorized" }, 401);
   await next();
 });
 
@@ -433,7 +448,25 @@ app.get("/api/curations", async (c) => {
   return c.json({ curations, total: files.length, page, totalPages: Math.ceil(files.length / limit), nextCursor });
 });
 
+// Simple in-memory rate limiter: max 20 search requests per IP per 10 seconds
+const searchRateMap = new Map<string, { count: number; resetAt: number }>();
+function isRateLimited(ip: string): boolean {
+  const now = Date.now();
+  const entry = searchRateMap.get(ip);
+  if (!entry || now > entry.resetAt) {
+    searchRateMap.set(ip, { count: 1, resetAt: now + 10_000 });
+    return false;
+  }
+  if (entry.count >= 20) return true;
+  entry.count++;
+  return false;
+}
+
 app.get("/api/search", async (c) => {
+  const ip = c.req.header("x-forwarded-for")?.split(",")[0].trim() ?? "unknown";
+  if (isRateLimited(ip)) {
+    return c.json({ error: "Too many requests" }, 429);
+  }
   const query = c.req.query("q")?.slice(0, 200).toLowerCase();
   if (!query || query.length < 2) return c.json({ results: [] });
   const files = await getCurationFiles();

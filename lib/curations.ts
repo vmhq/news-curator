@@ -22,7 +22,13 @@ function escapeHtmlInternal(str: string): string {
 // Custom renderer: open links in new tab + strip raw HTML to prevent stored XSS
 const renderer = new Renderer();
 renderer.link = function ({ href, text }: { href: string; text: string }) {
-  return `<a href="${href}" target="_blank" rel="noopener noreferrer">${text}</a>`;
+  // Only allow safe protocols — reject javascript:, data:, vbscript:, etc.
+  let safeParsed: URL | null = null;
+  try { safeParsed = new URL(href); } catch { /* relative URLs are fine */ }
+  if (safeParsed && safeParsed.protocol !== "http:" && safeParsed.protocol !== "https:") {
+    return escapeHtmlInternal(text);
+  }
+  return `<a href="${escapeHtmlInternal(href)}" target="_blank" rel="noopener noreferrer">${text}</a>`;
 };
 renderer.html = function ({ text }: { text: string }) {
   return escapeHtmlInternal(text);
@@ -143,7 +149,7 @@ function isGoodOgImage(imgUrl: string): boolean {
   return true;
 }
 
-function isBlockedUrl(url: string): boolean {
+export function isBlockedUrl(url: string): boolean {
   try {
     const parsed = new URL(url);
     const h = parsed.hostname;
