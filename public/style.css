@@ -767,6 +767,12 @@ mark {
   padding: 28px 24px;
 }
 
+[data-theme="light"] .footer {
+  background: var(--bg-alt);
+  color: var(--text-muted);
+  border-top: 1px solid var(--border);
+}
+
 .footer-inner {
   max-width: var(--max-width);
   margin: 0 auto;
