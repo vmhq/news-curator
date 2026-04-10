@@ -109,7 +109,9 @@ news-curator/
 | `GET` | `/api/search` | Búsqueda full-text (`?q=`) |
 | `GET` | `/health` | Estado del servidor |
 | `POST` | `/api/publish` | Publicar nueva edición (requiere `X-Api-Key`) |
-| `PUT` | `/api/curations/:date` | Editar edición existente (requiere `X-Api-Key`) |
+| `GET` | `/api/curations/:date` | Markdown raw de una edición |
+| `PUT` | `/api/curations/:date` | Reemplazar contenido de edición existente (requiere `X-Api-Key`) |
+| `PATCH` | `/api/curations/:date/meta` | Actualizar solo frontmatter (requiere `X-Api-Key`) |
 
 ## API de publicación y edición
 
@@ -129,8 +131,13 @@ curl -X POST https://dailyb.vmhq.cl/api/publish \
 { "success": true, "edition": "2026-04-09_14-30", "url": "/curacion/2026-04-09_14-30" }
 ```
 
-**Editar edición existente:**
+**Leer markdown raw:**
+```bash
+curl https://dailyb.vmhq.cl/api/curations/2026-04-09_14-30
+# → { "edition": "...", "content": "---\nimage_url: ...\n---\n..." }
+```
 
+**Editar edición completa (PUT):**
 ```bash
 curl -X PUT https://dailyb.vmhq.cl/api/curations/2026-04-09_14-30 \
   -H "X-Api-Key: TU_API_KEY" \
@@ -138,12 +145,22 @@ curl -X PUT https://dailyb.vmhq.cl/api/curations/2026-04-09_14-30 \
   --data-binary @curación-corregida.md
 ```
 
-**Respuesta (200):**
-```json
-{ "success": true, "edition": "2026-04-09_14-30", "url": "/curacion/2026-04-09_14-30" }
+**Editar solo el frontmatter (PATCH):**
+```bash
+curl -X PATCH https://dailyb.vmhq.cl/api/curations/2026-04-09_14-30/meta \
+  -H "X-Api-Key: TU_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"image_url": "https://nueva-imagen.com/foto.jpg"}'
+# Enviar null elimina el campo. El cuerpo markdown no se toca.
 ```
 
-Ambos endpoints aceptan `Content-Type: text/markdown` (body raw) o `application/json` con campo `content`. Los cambios se publican de inmediato — el caché de resúmenes se invalida automáticamente.
+POST y PUT validan `image_url` con un HEAD request; si no es accesible o no es imagen, incluyen un campo `warning` en la respuesta (sin bloquear el guardado). Los cambios se publican de inmediato — el caché de resúmenes se invalida automáticamente.
+
+**Paginación con cursor** (`GET /api/curations`):
+```
+?before=2026-04-09&limit=10   →  { curations, nextCursor, total }
+```
+Compatible con el modo clásico `?page=&limit=` — ambos devuelven `nextCursor`.
 
 Ver [`CURATION_SPEC.md`](./CURATION_SPEC.md) para el formato completo del archivo markdown y [`.claude/commands/curar.md`](./.claude/commands/curar.md) para el skill del agente.
 

@@ -120,24 +120,24 @@ La edición queda publicada inmediatamente en https://dailyb.vmhq.cl.
 
 ---
 
-## Editar edición existente
+## Leer markdown raw de una edición
 
-Usar el ID devuelto al publicar (o cualquier ID válido `YYYY-MM-DD` o `YYYY-MM-DD_HH-MM`):
+```bash
+curl https://dailyb.vmhq.cl/api/curations/2026-04-09_14-30
+# → { "edition": "2026-04-09_14-30", "content": "---\nimage_url: ...\n---\n..." }
+```
+
+Flujo típico para corregir una edición: GET → editar el campo → PUT.
+
+---
+
+## Editar edición completa (PUT)
 
 ```bash
 curl -X PUT https://dailyb.vmhq.cl/api/curations/2026-04-09_14-30 \
   -H "X-Api-Key: $DAILY_BRIEF_API_KEY" \
   -H "Content-Type: text/markdown" \
   --data-binary @curación-corregida.md
-```
-
-También como JSON:
-
-```bash
-curl -X PUT https://dailyb.vmhq.cl/api/curations/2026-04-09_14-30 \
-  -H "X-Api-Key: $DAILY_BRIEF_API_KEY" \
-  -H "Content-Type: application/json" \
-  -d "{\"content\": \"$(cat curación-corregida.md | jq -Rs .)\"}"
 ```
 
 **Respuesta exitosa (200):**
@@ -149,8 +149,34 @@ curl -X PUT https://dailyb.vmhq.cl/api/curations/2026-04-09_14-30 \
 }
 ```
 
+Si `image_url` en el frontmatter no es accesible o no devuelve `image/*`, la respuesta incluye un campo `warning` (no bloquea el guardado).
+
 > `PUT` solo edita — no crea. Si el ID no existe, responde `404`.
-> El caché de resúmenes se invalida automáticamente al guardar.
+
+---
+
+## Editar solo el frontmatter (PATCH meta)
+
+Útil para cambiar la imagen, sin tocar el cuerpo markdown:
+
+```bash
+curl -X PATCH https://dailyb.vmhq.cl/api/curations/2026-04-09_14-30/meta \
+  -H "X-Api-Key: $DAILY_BRIEF_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"image_url": "https://nueva-imagen.com/foto.jpg"}'
+```
+
+- Enviar `null` o `""` en un campo lo **elimina** del frontmatter.
+- El cuerpo del markdown queda intacto.
+
+**Respuesta exitosa (200):**
+```json
+{
+  "success": true,
+  "edition": "2026-04-09_14-30",
+  "meta": { "image_url": "https://nueva-imagen.com/foto.jpg" }
+}
+```
 
 ---
 

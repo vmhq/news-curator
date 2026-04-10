@@ -72,8 +72,59 @@ app.post("/api/publish", async (c) => {
   await writeFile(filePath, content, "utf-8");
   invalidateFilesCache();
 
-  return c.json({ success: true, edition: editionId, url: `/curacion/${editionId}` }, 201);
+  const warning = await checkImageUrl(content);
+  const resp: Record<string, unknown> = { success: true, edition: editionId, url: `/curacion/${editionId}` };
+  if (warning) resp.warning = warning;
+  return c.json(resp, 201);
 });
+
+// ── Shared helpers ───────────────────────────────────────────────────────────
+
+/** HEAD-check image_url from frontmatter; returns a warning string or null. */
+async function validateImageUrl(url: string): Promise<string | null> {
+  try {
+    const controller = new AbortController();
+    setTimeout(() => controller.abort(), 3000);
+    const resp = await fetch(url, { method: "HEAD", signal: controller.signal });
+    if (!resp.ok) return `image_url responded with HTTP ${resp.status}`;
+    const ct = resp.headers.get("content-type") ?? "";
+    if (!ct.startsWith("image/")) return `image_url is not an image (Content-Type: ${ct || "unknown"})`;
+    return null;
+  } catch {
+    return "image_url is not reachable";
+  }
+}
+
+/** Extract and validate image_url from markdown frontmatter; returns warning or null. */
+async function checkImageUrl(content: string): Promise<string | null> {
+  const m = content.match(/^---\n[\s\S]*?image_url:\s*["']?([^"'\n]+)["']?[\s\S]*?\n---/);
+  if (!m) return null;
+  return validateImageUrl(m[1].trim());
+}
+
+/** Parse frontmatter into a key→value map and the body below it. */
+function parseFrontmatter(content: string): { meta: Record<string, string>; body: string } {
+  const m = content.match(/^---\n([\s\S]*?)\n---\n([\s\S]*)$/);
+  if (!m) return { meta: {}, body: content };
+  const meta: Record<string, string> = {};
+  for (const line of m[1].split("\n")) {
+    const ci = line.indexOf(":");
+    if (ci === -1) continue;
+    const key = line.slice(0, ci).trim();
+    const val = line.slice(ci + 1).trim().replace(/^["']|["']$/g, "");
+    if (key) meta[key] = val;
+  }
+  return { meta, body: m[2] };
+}
+
+function serializeFrontmatter(meta: Record<string, string>, body: string): string {
+  const entries = Object.entries(meta);
+  if (entries.length === 0) return body;
+  const fm = entries.map(([k, v]) => `${k}: ${v}`).join("\n");
+  return `---\n${fm}\n---\n${body}`;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 
 app.use("/api/curations/:date", async (c, next) => {
   // Only guard write methods; GET is public
@@ -84,6 +135,19 @@ app.use("/api/curations/:date", async (c, next) => {
     c.req.header("Authorization")?.replace(/^Bearer\s+/i, "");
   if (!key || key !== API_KEY) return c.json({ error: "Unauthorized" }, 401);
   await next();
+});
+
+app.get("/api/curations/:date", async (c) => {
+  const date = c.req.param("date");
+  if (!/^\d{4}-\d{2}-\d{2}(_\d{2}-\d{2})?$/.test(date)) {
+    return c.json({ error: "Invalid edition ID format" }, 400);
+  }
+  const filePath = join(CURATIONS_DIR, `${date}.md`);
+  if (!existsSync(filePath)) {
+    return c.json({ error: `Edition '${date}' not found` }, 404);
+  }
+  const content = await readFile(filePath, "utf-8");
+  return c.json({ edition: date, content });
 });
 
 app.put("/api/curations/:date", async (c) => {
@@ -114,7 +178,56 @@ app.put("/api/curations/:date", async (c) => {
   await writeFile(filePath, content, "utf-8");
   invalidateSummaryCache(date);
 
-  return c.json({ success: true, edition: date, url: `/curacion/${date}` });
+  const warning = await checkImageUrl(content);
+  const resp: Record<string, unknown> = { success: true, edition: date, url: `/curacion/${date}` };
+  if (warning) resp.warning = warning;
+  return c.json(resp);
+});
+
+app.use("/api/curations/:date/meta", async (c, next) => {
+  if (!API_KEY) return c.json({ error: "Edit endpoint disabled: API_KEY not configured" }, 503);
+  const key =
+    c.req.header("X-Api-Key") ??
+    c.req.header("Authorization")?.replace(/^Bearer\s+/i, "");
+  if (!key || key !== API_KEY) return c.json({ error: "Unauthorized" }, 401);
+  await next();
+});
+
+app.patch("/api/curations/:date/meta", async (c) => {
+  const date = c.req.param("date");
+  if (!/^\d{4}-\d{2}-\d{2}(_\d{2}-\d{2})?$/.test(date)) {
+    return c.json({ error: "Invalid edition ID format" }, 400);
+  }
+
+  const filePath = join(CURATIONS_DIR, `${date}.md`);
+  if (!existsSync(filePath)) {
+    return c.json({ error: `Edition '${date}' not found` }, 404);
+  }
+
+  const patch = await c.req.json() as Record<string, string | null>;
+  if (typeof patch !== "object" || Array.isArray(patch)) {
+    return c.json({ error: "Body must be a JSON object of frontmatter fields" }, 400);
+  }
+
+  const existing = await readFile(filePath, "utf-8");
+  const { meta, body } = parseFrontmatter(existing);
+
+  for (const [key, value] of Object.entries(patch)) {
+    if (value === null || value === "") {
+      delete meta[key];
+    } else {
+      meta[key] = String(value);
+    }
+  }
+
+  const updated = serializeFrontmatter(meta, body);
+  await writeFile(filePath, updated, "utf-8");
+  invalidateSummaryCache(date);
+
+  const warning = meta.image_url ? await validateImageUrl(meta.image_url) : null;
+  const resp: Record<string, unknown> = { success: true, edition: date, meta };
+  if (warning) resp.warning = warning;
+  return c.json(resp);
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -287,8 +400,27 @@ app.get("/ediciones", async (c) => {
 
 app.get("/api/curations", async (c) => {
   const files = await getCurationFiles();
-  const page = Math.max(1, Math.min(1000, parseInt(c.req.query("page") || "1")));
   const limit = Math.max(1, Math.min(50, parseInt(c.req.query("limit") || "10")));
+
+  // Cursor-based pagination: ?before=YYYY-MM-DD[_HH-MM] (exclusive)
+  const before = c.req.query("before");
+  if (before) {
+    if (!/^\d{4}-\d{2}-\d{2}(_\d{2}-\d{2})?$/.test(before)) {
+      return c.json({ error: "Invalid 'before' cursor format (expected YYYY-MM-DD or YYYY-MM-DD_HH-MM)" }, 400);
+    }
+    const subset = files.filter((f) => f < before).slice(0, limit);
+    const settled = await Promise.allSettled(
+      subset.map(async (d) => ({ date: d, summary: await getCachedSummary(d) }))
+    );
+    const curations = settled
+      .filter((r): r is PromiseFulfilledResult<{ date: string; summary: string }> => r.status === "fulfilled")
+      .map((r) => r.value);
+    const nextCursor = curations.length === limit ? curations[curations.length - 1].date : null;
+    return c.json({ curations, nextCursor, total: files.length });
+  }
+
+  // Offset-based pagination (legacy): ?page=&limit=
+  const page = Math.max(1, Math.min(1000, parseInt(c.req.query("page") || "1")));
   const start = (page - 1) * limit;
   const paginated = files.slice(start, start + limit);
   const settled = await Promise.allSettled(
@@ -297,7 +429,8 @@ app.get("/api/curations", async (c) => {
   const curations = settled
     .filter((r): r is PromiseFulfilledResult<{ date: string; summary: string }> => r.status === "fulfilled")
     .map((r) => r.value);
-  return c.json({ curations, total: files.length, page, totalPages: Math.ceil(files.length / limit) });
+  const nextCursor = start + limit < files.length ? files[start + limit] : null;
+  return c.json({ curations, total: files.length, page, totalPages: Math.ceil(files.length / limit), nextCursor });
 });
 
 app.get("/api/search", async (c) => {
