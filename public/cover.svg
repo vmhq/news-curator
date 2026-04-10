@@ -25,7 +25,7 @@
   <!-- Bottom accent -->
   <rect x="100" y="430" width="300" height="2" rx="1" fill="#334155"/>
   <!-- Tagline -->
-  <text x="100" y="480" font-family="Inter,system-ui,sans-serif" font-size="16" font-weight="400" fill="#64748b">dailyb.vmhq.cl</text>
+  <text x="100" y="480" font-family="Inter,system-ui,sans-serif" font-size="16" font-weight="400" fill="#64748b">Daily Brief</text>
   <!-- Emoji -->
   <text x="1050" y="380" font-size="120" text-anchor="middle">📰</text>
 </svg>

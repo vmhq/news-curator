@@ -92,7 +92,7 @@ Resumen.
 ## Publicar nueva edición
 
 ```bash
-curl -X POST https://dailyb.vmhq.cl/api/publish \
+curl -X POST http://localhost:8391/api/publish \
   -H "X-Api-Key: $DAILY_BRIEF_API_KEY" \
   -H "Content-Type: text/markdown" \
   --data-binary @curación.md
@@ -101,7 +101,7 @@ curl -X POST https://dailyb.vmhq.cl/api/publish \
 También aceptado como JSON:
 
 ```bash
-curl -X POST https://dailyb.vmhq.cl/api/publish \
+curl -X POST http://localhost:8391/api/publish \
   -H "X-Api-Key: $DAILY_BRIEF_API_KEY" \
   -H "Content-Type: application/json" \
   -d "{\"content\": \"$(cat curación.md | jq -Rs .)\"}"
@@ -116,14 +116,14 @@ curl -X POST https://dailyb.vmhq.cl/api/publish \
 }
 ```
 
-La edición queda publicada inmediatamente en https://dailyb.vmhq.cl.
+La edición queda publicada inmediatamente en http://localhost:8391.
 
 ---
 
 ## Leer markdown raw de una edición
 
 ```bash
-curl https://dailyb.vmhq.cl/api/curations/2026-04-09_14-30
+curl http://localhost:8391/api/curations/2026-04-09_14-30
 # → { "edition": "2026-04-09_14-30", "content": "---\nimage_url: ...\n---\n..." }
 ```
 
@@ -134,7 +134,7 @@ Flujo típico para corregir una edición: GET → editar el campo → PUT.
 ## Editar edición completa (PUT)
 
 ```bash
-curl -X PUT https://dailyb.vmhq.cl/api/curations/2026-04-09_14-30 \
+curl -X PUT http://localhost:8391/api/curations/2026-04-09_14-30 \
   -H "X-Api-Key: $DAILY_BRIEF_API_KEY" \
   -H "Content-Type: text/markdown" \
   --data-binary @curación-corregida.md
@@ -160,7 +160,7 @@ Si `image_url` en el frontmatter no es accesible o no devuelve `image/*`, la res
 Útil para cambiar la imagen, sin tocar el cuerpo markdown:
 
 ```bash
-curl -X PATCH https://dailyb.vmhq.cl/api/curations/2026-04-09_14-30/meta \
+curl -X PATCH http://localhost:8391/api/curations/2026-04-09_14-30/meta \
   -H "X-Api-Key: $DAILY_BRIEF_API_KEY" \
   -H "Content-Type: application/json" \
   -d '{"image_url": "https://nueva-imagen.com/foto.jpg"}'
@@ -183,7 +183,7 @@ curl -X PATCH https://dailyb.vmhq.cl/api/curations/2026-04-09_14-30/meta \
 ## Verificar
 
 ```bash
-curl https://dailyb.vmhq.cl/health
+curl http://localhost:8391/health
 # {"status":"ok","uptime":...}
 ```
 

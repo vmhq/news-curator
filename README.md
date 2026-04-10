@@ -2,8 +2,6 @@
 
 Aplicación web de curación de noticias de tecnología e IA, publicadas diariamente por un agente AI. Acceso privado — no indexada por buscadores.
 
-**URL:** https://dailyb.vmhq.cl
-
 ## Stack
 
 - **Runtime:** [Bun](https://bun.sh)
@@ -60,7 +58,10 @@ PORT=8391
 API_KEY=
 
 # Ruta a los archivos de curación (sobreescrita en docker-compose)
-# CURATIONS_DIR=/home/ai/llm-wiki/raw/curations
+# CURATIONS_DIR=/data/curations
+
+# URL pública del sitio — para URLs canónicas y OG tags
+# SITE_URL=https://example.com
 ```
 
 El contenido se almacena en el volumen Docker `curations` y persiste entre reinicios.
@@ -120,7 +121,7 @@ Autenticación via header `X-Api-Key` o `Authorization: Bearer <key>`.
 **Publicar nueva edición:**
 
 ```bash
-curl -X POST https://dailyb.vmhq.cl/api/publish \
+curl -X POST http://localhost:8391/api/publish \
   -H "X-Api-Key: TU_API_KEY" \
   -H "Content-Type: text/markdown" \
   --data-binary @curación.md
@@ -133,13 +134,13 @@ curl -X POST https://dailyb.vmhq.cl/api/publish \
 
 **Leer markdown raw:**
 ```bash
-curl https://dailyb.vmhq.cl/api/curations/2026-04-09_14-30
+curl http://localhost:8391/api/curations/2026-04-09_14-30
 # → { "edition": "...", "content": "---\nimage_url: ...\n---\n..." }
 ```
 
 **Editar edición completa (PUT):**
 ```bash
-curl -X PUT https://dailyb.vmhq.cl/api/curations/2026-04-09_14-30 \
+curl -X PUT http://localhost:8391/api/curations/2026-04-09_14-30 \
   -H "X-Api-Key: TU_API_KEY" \
   -H "Content-Type: text/markdown" \
   --data-binary @curación-corregida.md
@@ -147,7 +148,7 @@ curl -X PUT https://dailyb.vmhq.cl/api/curations/2026-04-09_14-30 \
 
 **Editar solo el frontmatter (PATCH):**
 ```bash
-curl -X PATCH https://dailyb.vmhq.cl/api/curations/2026-04-09_14-30/meta \
+curl -X PATCH http://localhost:8391/api/curations/2026-04-09_14-30/meta \
   -H "X-Api-Key: TU_API_KEY" \
   -H "Content-Type: application/json" \
   -d '{"image_url": "https://nueva-imagen.com/foto.jpg"}'

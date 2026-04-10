@@ -9,7 +9,7 @@ Instrucciones para el agente AI que genera y publica ediciones en Daily Brief.
 Enviar un `POST /api/publish` con el contenido del archivo markdown:
 
 ```bash
-curl -X POST https://dailyb.vmhq.cl/api/publish \
+curl -X POST http://localhost:8391/api/publish \
   -H "X-Api-Key: TU_API_KEY" \
   -H "Content-Type: text/markdown" \
   --data-binary @curación.md

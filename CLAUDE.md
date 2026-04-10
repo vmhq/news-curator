@@ -16,11 +16,11 @@ Server runs on `http://localhost:8391`. There are no tests or linting configured
 
 Single-file server (`server.ts`) using **Bun** runtime + **Hono** framework. All HTML is server-rendered via the `buildPage()` function — no frontend build step or framework.
 
-**Data source**: Markdown files at `/home/ai/llm-wiki/raw/curations/` (external directory, not in this repo). Filenames follow the pattern `YYYY-MM-DD.md` or `YYYY-MM-DD_HH-MM.md` (multiple editions per day). The server reads files at request time — no cache, no database.
+**Data source**: Markdown files at the path set by `CURATIONS_DIR` env var (defaults to `/data/curations`). Filenames follow the pattern `YYYY-MM-DD.md` or `YYYY-MM-DD_HH-MM.md` (multiple editions per day). The server reads files at request time — no database.
 
 **Constants:**
-- `CURATIONS_DIR` — path to markdown files
-- `SITE_URL = "https://dailyb.vmhq.cl"` — used for canonical URLs and OG tags
+- `CURATIONS_DIR` — path to markdown files (env var, default `/data/curations`)
+- `SITE_URL` — env var, default `http://localhost:8391` — used for canonical URLs and OG tags
 - `TZ = "America/Santiago"` — timezone for `todayLocal()`
 - `DEFAULT_COVER = "${SITE_URL}/static/cover.svg"` — fallback hero image
 

@@ -4,8 +4,9 @@ import { join } from "path";
 import { marked, Renderer } from "marked";
 
 export const CURATIONS_DIR =
-  process.env.CURATIONS_DIR ?? "/home/ai/llm-wiki/raw/curations";
-export const SITE_URL = "https://dailyb.vmhq.cl";
+  process.env.CURATIONS_DIR ?? "/data/curations";
+export const SITE_URL =
+  process.env.SITE_URL ?? "http://localhost:8391";
 export const DEFAULT_COVER = `${SITE_URL}/static/cover.svg`;
 const TZ = "America/Santiago";
 
