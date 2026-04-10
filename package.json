@@ -1,0 +1,13 @@
+{
+  "name": "news-curator",
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "bun run server.ts",
+    "start": "bun run server.ts"
+  },
+  "dependencies": {
+    "hono": "^4.0.0",
+    "marked": "^15.0.0"
+  }
+}
