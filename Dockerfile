@@ -8,8 +8,10 @@ RUN bun install --frozen-lockfile --production
 # Copy source
 COPY . .
 
-# Data directory
-RUN mkdir -p /data/curations
+# Data directory — owned by the non-root bun user
+RUN mkdir -p /data/curations && chown -R bun:bun /data /app
+
+USER bun
 
 EXPOSE 8391
 

@@ -26,6 +26,18 @@ import { buildPage, escapeHtml } from "./templates/layout.ts";
 
 const app = new Hono();
 
+// ── Security headers (HTTP level — meta tags alone are insufficient) ──────────
+app.use("*", async (c, next) => {
+  await next();
+  c.res.headers.set("X-Frame-Options", "DENY");
+  c.res.headers.set("X-Content-Type-Options", "nosniff");
+  c.res.headers.set("Referrer-Policy", "strict-origin-when-cross-origin");
+  c.res.headers.set(
+    "Content-Security-Policy",
+    "default-src 'self'; script-src 'self'; style-src 'self' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' https: data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'self';"
+  );
+});
+
 app.use("/static/*", serveStatic({ root: "./", rewriteRequestPath: (p) => p.replace("/static/", "public/") }));
 app.get("/robots.txt", (c) => c.text("User-agent: *\nDisallow: /\n", 200, { "Content-Type": "text/plain" }));
 
@@ -95,7 +107,7 @@ async function validateImageUrl(url: string): Promise<string | null> {
   try {
     const controller = new AbortController();
     setTimeout(() => controller.abort(), 3000);
-    const resp = await fetch(url, { method: "HEAD", signal: controller.signal });
+    const resp = await fetch(url, { method: "HEAD", signal: controller.signal, redirect: "error" });
     if (!resp.ok) return `image_url responded with HTTP ${resp.status}`;
     const ct = resp.headers.get("content-type") ?? "";
     if (!ct.startsWith("image/")) return `image_url is not an image (Content-Type: ${ct || "unknown"})`;
@@ -450,6 +462,14 @@ app.get("/api/curations", async (c) => {
 
 // Simple in-memory rate limiter: max 20 search requests per IP per 10 seconds
 const searchRateMap = new Map<string, { count: number; resetAt: number }>();
+// Periodic cleanup to prevent unbounded memory growth from spoofed/unique IPs
+setInterval(() => {
+  const now = Date.now();
+  for (const [ip, entry] of searchRateMap) {
+    if (now > entry.resetAt) searchRateMap.delete(ip);
+  }
+}, 60_000);
+
 function isRateLimited(ip: string): boolean {
   const now = Date.now();
   const entry = searchRateMap.get(ip);
@@ -463,7 +483,10 @@ function isRateLimited(ip: string): boolean {
 }
 
 app.get("/api/search", async (c) => {
-  const ip = c.req.header("x-forwarded-for")?.split(",")[0].trim() ?? "unknown";
+  // Prefer the real connection IP; fall back to x-forwarded-for only if not available.
+  // Note: x-forwarded-for can be spoofed by clients — do not rely on it alone.
+  const connIp = (c.env as { requestIP?: { address: string } } | undefined)?.requestIP?.address;
+  const ip = connIp ?? c.req.header("x-forwarded-for")?.split(",")[0].trim() ?? "unknown";
   if (isRateLimited(ip)) {
     return c.json({ error: "Too many requests" }, 429);
   }

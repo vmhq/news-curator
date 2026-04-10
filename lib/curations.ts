@@ -152,12 +152,24 @@ function isGoodOgImage(imgUrl: string): boolean {
 export function isBlockedUrl(url: string): boolean {
   try {
     const parsed = new URL(url);
-    const h = parsed.hostname;
+    const h = parsed.hostname.toLowerCase().replace(/^\[|\]$/g, ""); // strip IPv6 brackets
     if (parsed.protocol !== "http:" && parsed.protocol !== "https:") return true;
-    if (h === "localhost" || h === "127.0.0.1" || h === "::1" || h === "0.0.0.0") return true;
+    // IPv4 private/loopback
+    if (h === "localhost" || h === "127.0.0.1" || h === "0.0.0.0") return true;
     if (h.startsWith("10.") || h.startsWith("192.168.")) return true;
     if (/^172\.(1[6-9]|2\d|3[01])\./.test(h)) return true;
     if (h === "169.254.169.254") return true;
+    // All link-local IPv4
+    if (h.startsWith("169.254.")) return true;
+    // IPv6 loopback and special ranges
+    if (h === "::1" || h === "::") return true;
+    // IPv4-mapped IPv6 (::ffff:127.x.x.x, ::ffff:10.x.x.x, etc.)
+    if (h.startsWith("::ffff:")) return true;
+    // Unique local (fc00::/7 — covers fc and fd prefixes)
+    if (/^f[cd]/i.test(h)) return true;
+    // Link-local IPv6 (fe80::/10)
+    if (/^fe[89ab]/i.test(h)) return true;
+    // DNS-based bypasses
     if (h.endsWith(".internal") || h.endsWith(".local") || h.endsWith(".localhost")) return true;
     return false;
   } catch {
@@ -177,6 +189,7 @@ export async function extractOgImage(url: string): Promise<string | null> {
     const timeout = setTimeout(() => controller.abort(), 5000);
     const resp = await fetch(url, {
       signal: controller.signal,
+      redirect: "error",
       headers: { "User-Agent": "Mozilla/5.0 (compatible; DailyBrief/1.0)" },
     });
     clearTimeout(timeout);
