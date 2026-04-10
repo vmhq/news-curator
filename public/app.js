@@ -48,6 +48,12 @@ document.addEventListener("DOMContentLoaded", () => {
     }
   });
 
+  function esc(str) {
+    const d = document.createElement("div");
+    d.textContent = str;
+    return d.innerHTML;
+  }
+
   async function fetchResults(q) {
     try {
       const res = await fetch(`/api/search?q=${encodeURIComponent(q)}`);
@@ -56,8 +62,8 @@ document.addEventListener("DOMContentLoaded", () => {
         searchResults.innerHTML = '<div class="search-result"><span class="search-result-snippet">Sin resultados</span></div>';
       } else {
         searchResults.innerHTML = data.results.map((r) => `
-          <a href="/curacion/${r.date}" class="search-result">
-            <span class="search-result-date">${r.date}</span>
+          <a href="/curacion/${encodeURIComponent(r.date)}" class="search-result">
+            <span class="search-result-date">${esc(r.date)}</span>
             <span class="search-result-snippet">${r.snippet}</span>
           </a>
         `).join("");
