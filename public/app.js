@@ -6,18 +6,33 @@ document.addEventListener("DOMContentLoaded", () => {
   // ─── Theme Toggle ───
   const html = document.documentElement;
   const themeBtn = document.getElementById("themeToggle");
+  const systemDark = window.matchMedia("(prefers-color-scheme: dark)");
 
-  const savedTheme = localStorage.getItem("theme");
-  if (savedTheme) {
-    html.dataset.theme = savedTheme;
-  } else if (window.matchMedia("(prefers-color-scheme: dark)").matches) {
-    html.dataset.theme = "dark";
+  // Migrate legacy "theme" key (light/dark) → "themeMode"
+  const legacyTheme = localStorage.getItem("theme");
+  if (legacyTheme && !localStorage.getItem("themeMode")) {
+    localStorage.setItem("themeMode", legacyTheme);
+    localStorage.removeItem("theme");
   }
 
+  function applyMode(mode) {
+    const effective = mode === "auto" ? (systemDark.matches ? "dark" : "light") : mode;
+    html.dataset.theme = effective;
+    html.dataset.themeMode = mode;
+  }
+
+  applyMode(localStorage.getItem("themeMode") ?? "auto");
+
+  // Keep auto mode in sync if the OS preference changes
+  systemDark.addEventListener("change", () => {
+    if ((localStorage.getItem("themeMode") ?? "auto") === "auto") applyMode("auto");
+  });
+
   themeBtn?.addEventListener("click", () => {
-    const next = html.dataset.theme === "dark" ? "light" : "dark";
-    html.dataset.theme = next;
-    localStorage.setItem("theme", next);
+    const current = localStorage.getItem("themeMode") ?? "auto";
+    const next = current === "auto" ? "light" : current === "light" ? "dark" : "auto";
+    localStorage.setItem("themeMode", next);
+    applyMode(next);
   });
 
   // ─── Search ───

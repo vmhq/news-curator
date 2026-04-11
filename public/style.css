@@ -216,8 +216,12 @@ mark {
 
 .theme-btn:hover { border-color: var(--blue); color: var(--blue); }
 
-[data-theme="light"] .icon-moon { display: none; }
-[data-theme="dark"] .icon-sun { display: none; }
+/* Show only the icon matching the active mode; default (no attr yet) shows auto icon */
+.icon-sun, .icon-moon { display: none; }
+[data-theme-mode="light"] .icon-auto  { display: none; }
+[data-theme-mode="light"] .icon-sun   { display: block; }
+[data-theme-mode="dark"]  .icon-auto  { display: none; }
+[data-theme-mode="dark"]  .icon-moon  { display: block; }
 
 /* Hamburger */
 .hamburger {
