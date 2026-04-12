@@ -358,12 +358,14 @@ mark {
 }
 
 .hero-headline {
-  font-family: 'Playfair Display', Georgia, serif;
+  font-family: var(--font);
   font-size: 28px;
-  font-weight: 800;
+  font-weight: 700;
   line-height: 1.2;
-  letter-spacing: -0.3px;
+  letter-spacing: -0.5px;
   margin-bottom: 14px;
+  text-wrap: balance;
+  text-transform: capitalize;
 }
 
 .hero-excerpt {
