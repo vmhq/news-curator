@@ -119,8 +119,10 @@ genera código funcional con una tasa de error inferior al 2%.
 ```
 
 **Reglas importantes:**
-- El emoji `🔥` y el texto `Featured Story:` deben aparecer exactamente así.
-- El titular va en la misma línea que `## 🔥 Featured Story:`.
+- El emoji `🔥` es **obligatorio** — es lo que el servidor detecta para generar el hero/banner.
+- El texto `Featured Story:` es **convencional pero opcional**; el parser acepta `## 🔥 TITULAR` directamente.
+- Cualquier otro emoji (⭐, 📌, etc.) **no genera hero** — solo `🔥` activa esa lógica.
+- El titular va en la misma línea que el `## 🔥`.
 - Debe haber una **línea en blanco** entre el titular y el cuerpo.
 - El **primer párrafo** (hasta el primer doble salto de línea) es el extracto que aparece en el hero — debe ser autónomo y atractivo (máx. ~280 caracteres).
 - La **primera URL** en el cuerpo se usa para intentar obtener la imagen de portada si no hay `image_url` en el frontmatter.
@@ -227,6 +229,7 @@ por Sequoia y fondos soberanos de Medio Oriente.
 
 | ❌ Incorrecto | ✅ Correcto |
 |---|---|
+| `## ⭐ Historia Destacada: ...` | `## 🔥 Featured Story: ...` — solo `🔥` activa el hero |
 | `## 🔥Featured Story: ...` | `## 🔥 Featured Story: ...` (espacio después del emoji) |
 | Sin línea en blanco entre titular y cuerpo de la Featured | Siempre línea en blanco entre `## 🔥 ...` y el texto |
 | `### Titular` sin URL | `### [Titular](https://url.com)` |

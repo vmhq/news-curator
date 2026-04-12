@@ -78,8 +78,9 @@ Resumen.
 
 | Elemento | Regla |
 |----------|-------|
-| `## 🔥 Featured Story:` | Espacio entre emoji y texto. El titular va en la misma línea. |
-| Cuerpo de Featured | **Línea en blanco obligatoria** entre el `## 🔥` y el primer párrafo. |
+| `## 🔥` | El emoji `🔥` es **obligatorio** — es lo que dispara el hero/banner. Cualquier otro emoji (⭐, etc.) no genera hero. |
+| `Featured Story:` | Convencional pero **opcional**. El parser acepta `## 🔥 TITULAR` directamente. |
+| Cuerpo de Featured | **Línea en blanco obligatoria** entre el `## 🔥 ...` y el primer párrafo. |
 | Primera URL en Featured | Usada para extraer imagen si no hay `image_url`. Siempre incluirla. |
 | Artículos de sección | `### [Titular](url)` — el link va en el propio titular, no separado. |
 | Separadores | `---` entre cada sección, incluyendo después del bloque intro. |

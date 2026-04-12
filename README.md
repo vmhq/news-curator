@@ -176,7 +176,7 @@ image_url: https://...        ← imagen hero (opcional)
 # Título de la edición
 *Generado el ...*
 ---
-## 🔥 Featured Story: TITULAR  ← noticia principal (hero + cuerpo)
+## 🔥 Featured Story: TITULAR  ← noticia principal (hero + cuerpo). El emoji 🔥 es obligatorio; "Featured Story:" es opcional.
 
 Primer párrafo con [enlace principal](https://url.com).
 
