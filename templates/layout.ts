@@ -116,10 +116,11 @@ export function buildPage(
   <meta name="twitter:image" content="${escapeHtml(ogImage)}">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Playfair+Display:wght@700;800&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="/static/style.css">
 </head>
 <body>
+  <div id="readProgress" class="read-progress"></div>
   <nav class="navbar">
     <div class="nav-inner">
       <a href="/" class="nav-logo">📰 Daily Brief</a>

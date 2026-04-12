@@ -108,15 +108,22 @@ document.addEventListener("DOMContentLoaded", () => {
     }
   }
 
+  // ─── Reading Progress Bar ───
+  const readProgress = document.getElementById("readProgress");
   // ─── Scroll to Top ───
   const scrollTopBtn = document.getElementById("scrollTopBtn");
   window.addEventListener("scroll", () => {
+    if (readProgress) {
+      const scrollTop = window.scrollY;
+      const docHeight = document.documentElement.scrollHeight - window.innerHeight;
+      readProgress.style.width = docHeight > 0 ? `${Math.min((scrollTop / docHeight) * 100, 100)}%` : "0%";
+    }
     if (window.scrollY > 300) {
       scrollTopBtn?.classList.add("visible");
     } else {
       scrollTopBtn?.classList.remove("visible");
     }
-  });
+  }, { passive: true });
   scrollTopBtn?.addEventListener("click", () => {
     window.scrollTo({ top: 0, behavior: "smooth" });
   });
