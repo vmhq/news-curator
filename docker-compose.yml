@@ -8,8 +8,10 @@ services:
       PORT: "8391"
       API_KEY: "${API_KEY}"
       CURATIONS_DIR: "/data/curations"
+      UPLOADS_DIR: "/data/uploads"
     volumes:
       - curations:/data/curations
+      - uploads:/data/uploads
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://localhost:8391/health"]
       interval: 30s
@@ -19,3 +21,4 @@ services:
 
 volumes:
   curations:
+  uploads:

@@ -125,6 +125,7 @@ DAILY_BRIEF_URL=       # URL base del servidor, ej: https://dailyb.vmhq.cl
 | `API_KEY` | — | API key para endpoints autenticados. Generar con `openssl rand -hex 32` |
 | `CURATIONS_DIR` | `/data/curations` | Directorio con los archivos Markdown de ediciones |
 | `SITE_URL` | `http://localhost:8391` | URL pública — usada en canonical y OG tags |
+| `UPLOADS_DIR` | `public/uploads` | Directorio de imágenes subidas vía API. En Docker apunta a `/data/uploads` (volumen persistente) para que las imágenes sobrevivan rebuilds |
 
 ## Seguridad
 

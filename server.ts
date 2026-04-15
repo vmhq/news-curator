@@ -44,6 +44,25 @@ app.use("*", async (c, next) => {
   }
 });
 
+// Serve uploaded images from UPLOADS_DIR — must be registered BEFORE the generic
+// serveStatic so it takes priority when UPLOADS_DIR points to an external volume.
+app.use("/static/uploads/*", async (c, next) => {
+  const filename = basename(c.req.path.slice("/static/uploads/".length));
+  if (!filename) return next();
+  const filePath = join(UPLOADS_DIR, filename);
+  try {
+    const data = await readFile(filePath);
+    const ext = filename.split(".").pop()?.toLowerCase() ?? "";
+    const mime: Record<string, string> = {
+      jpg: "image/jpeg", jpeg: "image/jpeg", png: "image/png",
+      webp: "image/webp", gif: "image/gif", avif: "image/avif", svg: "image/svg+xml",
+    };
+    return c.body(data, 200, { "Content-Type": mime[ext] ?? "application/octet-stream", "Cache-Control": "public, max-age=31536000, immutable" });
+  } catch {
+    return next();
+  }
+});
+
 app.use("/static/*", serveStatic({ root: "./", rewriteRequestPath: (p) => p.replace("/static/", "public/") }));
 app.get("/robots.txt", (c) => c.text("User-agent: *\nDisallow: /\n", 200, { "Content-Type": "text/plain" }));
 
@@ -64,7 +83,10 @@ function isValidApiKey(provided: string): boolean {
 
 // ── Image upload API ──────────────────────────────────────────────────────────
 
-const UPLOADS_DIR = join("public", "uploads");
+// UPLOADS_DIR can be overridden via env var so uploads persist in Docker volumes.
+// Default: public/uploads (works for local dev).
+// In Docker: set UPLOADS_DIR=/data/uploads and mount it as a named volume.
+const UPLOADS_DIR = process.env.UPLOADS_DIR ?? join("public", "uploads");
 const MAX_IMAGE_SIZE = 10 * 1024 * 1024; // 10 MB
 const ALLOWED_IMAGE_TYPES = new Set(["image/jpeg", "image/png", "image/webp", "image/gif", "image/avif"]);
 const IMAGE_EXT: Record<string, string> = {
