@@ -88,19 +88,8 @@ document.addEventListener("DOMContentLoaded", () => {
       h.id = id;
 
       // Anchor link
-      const anchor = document.createElement("a");
-      anchor.href = `#${id}`;
-      anchor.className = "heading-anchor";
-      anchor.textContent = "#";
-      anchor.setAttribute("aria-label", "Enlace a esta sección");
-      anchor.addEventListener("click", (e) => {
-        e.preventDefault();
-        history.pushState(null, "", `#${id}`);
-        h.scrollIntoView({ behavior: "smooth", block: "start" });
-      });
-      h.appendChild(anchor);
 
-      tocHeadings.push({ id, text: rawText.replace(/#$/, "").trim(), level: h.tagName });
+      tocHeadings.push({ id, text: rawText, level: h.tagName });
     });
   }
 

@@ -755,28 +755,6 @@ mark {
   color: inherit;
 }
 
-/* ─── Heading Anchor Links ─── */
-.heading-anchor {
-  margin-left: 8px;
-  font-size: 0.72em;
-  font-weight: 400;
-  color: var(--text-muted);
-  text-decoration: none !important;
-  opacity: 0;
-  transition: opacity var(--transition), color var(--transition);
-  border-bottom: none !important;
-  flex-shrink: 0;
-}
-
-.article-body h2:hover .heading-anchor,
-.article-body h3:hover .heading-anchor {
-  opacity: 0.6;
-}
-
-.heading-anchor:hover {
-  opacity: 1 !important;
-  color: var(--blue) !important;
-}
 
 /* Edition cards on /ediciones */
 .edition-card {
