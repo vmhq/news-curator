@@ -51,9 +51,10 @@ volumes:
 **`.env`**
 ```bash
 PORT=8391
-API_KEY=          # generar con: openssl rand -hex 32
+API_KEY=             # generar con: openssl rand -hex 32
 # CURATIONS_DIR=/data/curations
 # SITE_URL=https://example.com
+# TRUSTED_PROXY_IP=  # IP(s) del reverse proxy, ej: 127.0.0.1,::1
 ```
 
 El contenido se almacena en el volumen Docker `curations` y persiste entre reinicios.
@@ -116,6 +117,26 @@ El flujo típico del agente es: **Miniflux** (recopilar noticias) → **curar** 
 DAILY_BRIEF_API_KEY=   # API key para los endpoints autenticados (= API_KEY del servidor)
 DAILY_BRIEF_URL=       # URL base del servidor, ej: https://dailyb.vmhq.cl
 ```
+
+## Variables de entorno
+
+| Variable | Default | Descripción |
+|----------|---------|-------------|
+| `PORT` | `8391` | Puerto en que escucha el servidor |
+| `API_KEY` | — | API key para endpoints autenticados. Generar con `openssl rand -hex 32` |
+| `CURATIONS_DIR` | `/data/curations` | Directorio con los archivos Markdown de ediciones |
+| `SITE_URL` | `http://localhost:8391` | URL pública — usada en canonical y OG tags |
+| `TRUSTED_PROXY_IP` | — | IPs del reverse proxy confiable, separadas por coma (ej: `127.0.0.1,::1`). Cuando el request viene de una de estas IPs, se usa el header `x-forwarded-for` para el rate limiting de búsqueda |
+
+## Seguridad
+
+- **API key** — todos los endpoints de escritura requieren `X-Api-Key` o `Authorization: Bearer <key>`. Comparación con `timingSafeEqual` para prevenir timing attacks.
+- **Rate limiting** — `/api/search` acepta máx 20 requests/10s por IP. El mapa de IPs tiene un cap de 10.000 entradas para prevenir DoS por memoria.
+- **Headers de seguridad** — `X-Frame-Options: DENY`, `X-Content-Type-Options: nosniff`, `Referrer-Policy`, `Content-Security-Policy` aplicados en todos los responses. `Strict-Transport-Security` se activa automáticamente cuando `SITE_URL` usa `https://`.
+- **SSRF** — la función `extractOgImage` bloquea IPs privadas, loopback, link-local e IPv6 especiales. Redirects desactivados (`redirect: "error"`). Timeout de 5s.
+- **Path traversal** — los uploads se validan con `path.basename()` para rechazar cualquier componente de directorio en el nombre de archivo.
+- **XSS** — el HTML renderizado desde markdown usa un renderer personalizado que escapa tags raw. Los links solo permiten protocolos `http:` y `https:`.
+- **Privacidad** — `noindex, nofollow` en todas las páginas + `/robots.txt` con `Disallow: /`.
 
 ## Rutas HTTP
 

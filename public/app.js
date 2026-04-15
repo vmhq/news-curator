@@ -51,6 +51,7 @@ document.addEventListener("DOMContentLoaded", () => {
       });
       heroImg.addEventListener("error", () => {
         heroWrap.classList.remove("loading");
+        heroWrap.innerHTML = '<div class="hero-image-placeholder"><span class="hero-emoji">📰</span></div>';
       });
     }
   }

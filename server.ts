@@ -2,7 +2,7 @@ import { Hono } from "hono";
 import { serveStatic } from "hono/bun";
 import { readFile, writeFile, mkdir } from "fs/promises";
 import { existsSync } from "fs";
-import { join } from "path";
+import { join, basename } from "path";
 import { timingSafeEqual } from "node:crypto";
 import {
   CURATIONS_DIR,
@@ -37,6 +37,10 @@ app.use("*", async (c, next) => {
     "Content-Security-Policy",
     "default-src 'self'; script-src 'self'; style-src 'self' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' https: data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'self';"
   );
+  // HSTS only makes sense over HTTPS — skip on local/http deployments
+  if (SITE_URL.startsWith("https://")) {
+    c.res.headers.set("Strict-Transport-Security", "max-age=31536000; includeSubDomains");
+  }
 });
 
 app.use("/static/*", serveStatic({ root: "./", rewriteRequestPath: (p) => p.replace("/static/", "public/") }));
@@ -48,6 +52,16 @@ app.get("/health", (c) => c.json({ status: "ok", uptime: process.uptime() }));
 
 const API_KEY = process.env.API_KEY;
 if (!API_KEY) console.warn("⚠️  API_KEY not set — POST /api/publish is disabled");
+
+// Trusted reverse-proxy IPs — comma-separated list (e.g. "127.0.0.1,::1")
+// When a connection comes from a trusted proxy, x-forwarded-for is used to
+// get the real client IP for rate limiting. Leave unset if not behind a proxy.
+const TRUSTED_PROXIES: Set<string> = new Set(
+  (process.env.TRUSTED_PROXY_IP ?? "")
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean)
+);
 
 /** Timing-safe API key check to prevent timing attacks. */
 function isValidApiKey(provided: string): boolean {
@@ -157,8 +171,10 @@ app.post("/api/publish", async (c) => {
 async function validateImageUrl(url: string): Promise<string | null> {
   // Local uploaded images — validate by file existence, not HTTP
   if (url.startsWith("/static/uploads/")) {
-    const filename = url.slice("/static/uploads/".length);
-    if (!filename || filename.includes("..") || filename.includes("/")) {
+    const raw = url.slice("/static/uploads/".length);
+    // basename() strips any directory components (including encoded traversals)
+    const filename = basename(raw);
+    if (!filename || filename !== raw) {
       return "image_url local inválida";
     }
     if (!existsSync(join(UPLOADS_DIR, filename))) {
@@ -234,7 +250,7 @@ app.get("/api/curations/:date", async (c) => {
   }
   const filePath = join(CURATIONS_DIR, `${date}.md`);
   if (!existsSync(filePath)) {
-    return c.json({ error: `Edition '${date}' not found` }, 404);
+    return c.json({ error: "Edition not found" }, 404);
   }
   const content = await readFile(filePath, "utf-8");
   return c.json({ edition: date, content });
@@ -528,7 +544,8 @@ app.get("/api/curations", async (c) => {
 
 // Simple in-memory rate limiter: max 20 search requests per IP per 10 seconds
 const searchRateMap = new Map<string, { count: number; resetAt: number }>();
-// Periodic cleanup to prevent unbounded memory growth from spoofed/unique IPs
+const MAX_RATE_MAP_SIZE = 10_000;
+// Periodic cleanup to prevent unbounded memory growth
 setInterval(() => {
   const now = Date.now();
   for (const [ip, entry] of searchRateMap) {
@@ -540,6 +557,11 @@ function isRateLimited(ip: string): boolean {
   const now = Date.now();
   const entry = searchRateMap.get(ip);
   if (!entry || now > entry.resetAt) {
+    // Evict oldest entry if map is at capacity
+    if (searchRateMap.size >= MAX_RATE_MAP_SIZE) {
+      const firstKey = searchRateMap.keys().next().value;
+      if (firstKey !== undefined) searchRateMap.delete(firstKey);
+    }
     searchRateMap.set(ip, { count: 1, resetAt: now + 10_000 });
     return false;
   }
@@ -549,10 +571,14 @@ function isRateLimited(ip: string): boolean {
 }
 
 app.get("/api/search", async (c) => {
-  // Prefer the real connection IP; fall back to x-forwarded-for only if not available.
-  // Note: x-forwarded-for can be spoofed by clients — do not rely on it alone.
-  const connIp = (c.env as { requestIP?: { address: string } } | undefined)?.requestIP?.address;
-  const ip = connIp ?? c.req.header("x-forwarded-for")?.split(",")[0].trim() ?? "unknown";
+  // If the connection comes from a trusted proxy, use x-forwarded-for to get
+  // the real client IP. Otherwise use the raw connection IP. This prevents
+  // spoofing x-forwarded-for from untrusted clients while still working correctly
+  // behind Nginx, Caddy, Traefik, etc. when TRUSTED_PROXY_IP is configured.
+  const connIp = (c.env as { requestIP?: { address: string } } | undefined)?.requestIP?.address ?? "";
+  const ip = (connIp && TRUSTED_PROXIES.has(connIp))
+    ? (c.req.header("x-forwarded-for")?.split(",")[0].trim() ?? connIp)
+    : (connIp || "anonymous");
   if (isRateLimited(ip)) {
     return c.json({ error: "Too many requests" }, 429);
   }

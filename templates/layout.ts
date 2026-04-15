@@ -82,7 +82,7 @@ export function buildPage(
 
   // Hero image — add loading class when there's a real image to show skeleton shimmer
   const heroImageHtml = heroImage
-    ? `<div class="hero-image loading" id="heroImageWrap"><img src="${escapeHtml(heroImage)}" alt="${escapeHtml(featured?.headline || "")}" loading="eager" id="heroImg" onerror="this.parentElement.classList.remove('loading');this.parentElement.innerHTML='<div class=\\'hero-image-placeholder\\'><span class=\\'hero-emoji\\'>📰</span></div>'"></div>`
+    ? `<div class="hero-image loading" id="heroImageWrap"><img src="${escapeHtml(heroImage)}" alt="${escapeHtml(featured?.headline || "")}" loading="eager" id="heroImg"></div>`
     : featured
     ? `<div class="hero-image"><div class="hero-image-placeholder"><span class="hero-emoji">📰</span></div></div>`
     : "";
