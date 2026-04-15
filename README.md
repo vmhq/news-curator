@@ -165,6 +165,34 @@ Compatible con el modo clásico `?page=&limit=` — ambos devuelven `nextCursor`
 
 Ver [`CURATION_SPEC.md`](./CURATION_SPEC.md) para el formato completo del archivo markdown y [`.claude/commands/curar.md`](./.claude/commands/curar.md) para el skill del agente.
 
+## Integración con agentes AI
+
+Daily Brief está diseñado para ser operado por agentes AI. El proyecto incluye skills de Claude Code que automatizan la curación, redacción y publicación de ediciones.
+
+### Skills disponibles
+
+| Skill | Invocación | Descripción |
+|-------|-----------|-------------|
+| Curar | `/curar` | Genera y publica una nueva edición completa desde cero |
+| Daily Brief | `anthropic-skills:daily-brief` | Interactúa con Daily Brief — publicar, leer y editar ediciones |
+| Miniflux | `anthropic-skills:miniflux` | Curación desde Miniflux RSS — filtra y resume noticias relevantes |
+
+El flujo típico del agente es: **Miniflux** (recopilar noticias) → **curar** (redactar y publicar).
+
+### Variables de entorno requeridas por el agente
+
+```bash
+DAILY_BRIEF_API_KEY=   # API key para los endpoints autenticados (= API_KEY del servidor)
+DAILY_BRIEF_URL=       # URL base del servidor, ej: https://dailyb.vmhq.cl
+```
+
+### Especificaciones para el agente
+
+| Archivo | Contenido |
+|---------|-----------|
+| [`.claude/commands/curar.md`](./.claude/commands/curar.md) | Skill principal — proceso, formato markdown, reglas críticas y ejemplos de curl |
+| [`CURATION_SPEC.md`](./CURATION_SPEC.md) | Especificación completa del formato — cada sección explicada con ejemplos y errores comunes |
+
 ## Formato del contenido
 
 Los archivos siguen la convención `YYYY-MM-DD_HH-MM.md`. Estructura esperada:

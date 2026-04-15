@@ -5,6 +5,53 @@ relevantes del día en tecnología e inteligencia artificial.
 
 ---
 
+## Especificaciones para agentes AI
+
+Este skill está diseñado para ser ejecutado de forma autónoma por un agente AI (Claude Code u otro agente compatible).
+
+### Variables de entorno necesarias
+
+| Variable | Uso |
+|----------|-----|
+| `DAILY_BRIEF_API_KEY` | Header `X-Api-Key` para `POST /api/publish`, `PUT` y `PATCH` |
+| `DAILY_BRIEF_URL` | URL base del servidor (ej: `https://dailyb.vmhq.cl` o `http://localhost:8391`) |
+
+Si `DAILY_BRIEF_URL` no está definida, usar `http://localhost:8391` como fallback.
+
+### Autenticación
+
+Todos los endpoints de escritura requieren autenticación vía header:
+```
+X-Api-Key: $DAILY_BRIEF_API_KEY
+```
+También aceptado como `Authorization: Bearer $DAILY_BRIEF_API_KEY`.
+
+### Flujo autónomo completo
+
+```
+1. Recopilar noticias (Miniflux RSS, WebSearch, o fuentes directas)
+   └─ Usar skill anthropic-skills:miniflux si está disponible
+
+2. Seleccionar Featured Story — la noticia más impactante del día
+
+3. Redactar el archivo markdown según CURATION_SPEC.md
+
+4. Publicar via POST /api/publish
+
+5. Verificar la edición publicada visitando la URL devuelta
+```
+
+### Manejo de errores
+
+| Código | Causa | Acción |
+|--------|-------|--------|
+| `401` | API key inválida o ausente | Verificar `DAILY_BRIEF_API_KEY` |
+| `400` | Markdown malformado o sin Featured Story | Revisar formato según spec |
+| `409` | Ya existe una edición para ese timestamp | Normal — el servidor agrega sufijo horario automáticamente |
+| `warning` en respuesta | `image_url` no accesible | No bloquea; la edición se publica igual |
+
+---
+
 ## Proceso
 
 1. **Recopilar** noticias relevantes publicadas hoy (o las últimas 24h).
@@ -93,7 +140,7 @@ Resumen.
 ## Publicar nueva edición
 
 ```bash
-curl -X POST http://localhost:8391/api/publish \
+curl -X POST "${DAILY_BRIEF_URL:-http://localhost:8391}/api/publish" \
   -H "X-Api-Key: $DAILY_BRIEF_API_KEY" \
   -H "Content-Type: text/markdown" \
   --data-binary @curación.md
@@ -102,7 +149,7 @@ curl -X POST http://localhost:8391/api/publish \
 También aceptado como JSON:
 
 ```bash
-curl -X POST http://localhost:8391/api/publish \
+curl -X POST "${DAILY_BRIEF_URL:-http://localhost:8391}/api/publish" \
   -H "X-Api-Key: $DAILY_BRIEF_API_KEY" \
   -H "Content-Type: application/json" \
   -d "{\"content\": \"$(cat curación.md | jq -Rs .)\"}"
@@ -117,14 +164,14 @@ curl -X POST http://localhost:8391/api/publish \
 }
 ```
 
-La edición queda publicada inmediatamente en http://localhost:8391.
+La edición queda publicada inmediatamente. Navegar a `$DAILY_BRIEF_URL` + el `url` devuelto para verificar.
 
 ---
 
 ## Leer markdown raw de una edición
 
 ```bash
-curl http://localhost:8391/api/curations/2026-04-09_14-30
+curl "${DAILY_BRIEF_URL:-http://localhost:8391}/api/curations/2026-04-09_14-30"
 # → { "edition": "2026-04-09_14-30", "content": "---\nimage_url: ...\n---\n..." }
 ```
 
@@ -135,7 +182,7 @@ Flujo típico para corregir una edición: GET → editar el campo → PUT.
 ## Editar edición completa (PUT)
 
 ```bash
-curl -X PUT http://localhost:8391/api/curations/2026-04-09_14-30 \
+curl -X PUT "${DAILY_BRIEF_URL:-http://localhost:8391}/api/curations/2026-04-09_14-30" \
   -H "X-Api-Key: $DAILY_BRIEF_API_KEY" \
   -H "Content-Type: text/markdown" \
   --data-binary @curación-corregida.md
@@ -161,7 +208,7 @@ Si `image_url` en el frontmatter no es accesible o no devuelve `image/*`, la res
 Útil para cambiar la imagen, sin tocar el cuerpo markdown:
 
 ```bash
-curl -X PATCH http://localhost:8391/api/curations/2026-04-09_14-30/meta \
+curl -X PATCH "${DAILY_BRIEF_URL:-http://localhost:8391}/api/curations/2026-04-09_14-30/meta" \
   -H "X-Api-Key: $DAILY_BRIEF_API_KEY" \
   -H "Content-Type: application/json" \
   -d '{"image_url": "https://nueva-imagen.com/foto.jpg"}'
@@ -184,9 +231,9 @@ curl -X PATCH http://localhost:8391/api/curations/2026-04-09_14-30/meta \
 ## Verificar
 
 ```bash
-curl http://localhost:8391/health
+curl "${DAILY_BRIEF_URL:-http://localhost:8391}/health"
 # {"status":"ok","uptime":...}
 ```
 
-Navegar a la URL devuelta en la respuesta para confirmar que la edición
+Navegar a `$DAILY_BRIEF_URL` + el `url` devuelto en la respuesta para confirmar que la edición
 se renderiza correctamente con hero, secciones y Quick Links.
