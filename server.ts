@@ -278,7 +278,7 @@ app.put("/api/curations/:date", async (c) => {
 
   const filePath = join(CURATIONS_DIR, `${date}.md`);
   if (!existsSync(filePath)) {
-    return c.json({ error: `Edition '${date}' not found` }, 404);
+    return c.json({ error: "Edition not found" }, 404);
   }
 
   let content: string;
@@ -321,7 +321,7 @@ app.patch("/api/curations/:date/meta", async (c) => {
 
   const filePath = join(CURATIONS_DIR, `${date}.md`);
   if (!existsSync(filePath)) {
-    return c.json({ error: `Edition '${date}' not found` }, 404);
+    return c.json({ error: "Edition not found" }, 404);
   }
 
   const patch = await c.req.json() as Record<string, string | null>;
