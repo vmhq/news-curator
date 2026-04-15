@@ -116,6 +116,8 @@ export async function readCuration(
     display = display.replace(/^# .+\n+/, "");
     display = display.replace(/^\*Generado .+\*\n+/, "");
     display = display.replace(/^---\n+/, "");
+    // Normalize Featured Story heading: strip "Featured Story:" prefix for consistent rendering
+    display = display.replace(/^(## 🔥)\s*Featured Story:\s*/gm, "$1 ");
     const html = await marked.parse(display);
     return { raw, html, coverImage };
   } catch {
