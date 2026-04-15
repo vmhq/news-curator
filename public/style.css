@@ -859,12 +859,12 @@ mark {
 
 .toc-item {
   display: block;
-  font-size: 12.5px;
-  color: var(--text-muted) !important;
+  font-size: 13px;
+  color: var(--text-secondary) !important;
   text-decoration: none !important;
-  padding: 5px 10px 5px 10px;
-  border-left: 2px solid var(--border);
-  border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+  padding: 7px 12px;
+  border-radius: var(--radius);
+  border-left: 3px solid transparent;
   transition: all var(--transition);
   line-height: 1.4;
   white-space: nowrap;
@@ -873,27 +873,25 @@ mark {
 }
 
 .toc-item:hover {
-  color: var(--text) !important;
+  background: linear-gradient(90deg, var(--blue-light), transparent);
   border-left-color: var(--blue);
-  background: var(--blue-light);
-  padding-left: 12px;
+  color: var(--text) !important;
 }
 
 .toc-item.active {
-  color: var(--blue) !important;
+  background: linear-gradient(90deg, var(--blue-light), transparent);
   border-left-color: var(--blue);
-  background: var(--blue-light);
+  color: var(--blue) !important;
   font-weight: 600;
 }
 
 .toc-item.toc-h3 {
-  font-size: 11.5px;
+  font-size: 12px;
   padding-left: 20px;
   color: var(--text-muted) !important;
 }
 
-.toc-item.toc-h3:hover { padding-left: 22px; }
-.toc-item.toc-h3.active { padding-left: 20px; }
+.toc-item.toc-h3.active { color: var(--blue) !important; }
 
 /* ─── Recent list ─── */
 .recent-list { display: flex; flex-direction: column; gap: 2px; }
