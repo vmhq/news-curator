@@ -6,6 +6,7 @@ import { join, basename } from "path";
 import { timingSafeEqual } from "node:crypto";
 import {
   CURATIONS_DIR,
+  SITE_URL,
   startDirWatcher,
   getCurationFiles,
   getCachedSummary,
