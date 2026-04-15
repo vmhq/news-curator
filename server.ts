@@ -53,15 +53,6 @@ app.get("/health", (c) => c.json({ status: "ok", uptime: process.uptime() }));
 const API_KEY = process.env.API_KEY;
 if (!API_KEY) console.warn("⚠️  API_KEY not set — POST /api/publish is disabled");
 
-// Trusted reverse-proxy IPs — comma-separated list (e.g. "127.0.0.1,::1")
-// When a connection comes from a trusted proxy, x-forwarded-for is used to
-// get the real client IP for rate limiting. Leave unset if not behind a proxy.
-const TRUSTED_PROXIES: Set<string> = new Set(
-  (process.env.TRUSTED_PROXY_IP ?? "")
-    .split(",")
-    .map((s) => s.trim())
-    .filter(Boolean)
-);
 
 /** Timing-safe API key check to prevent timing attacks. */
 function isValidApiKey(provided: string): boolean {
@@ -571,14 +562,11 @@ function isRateLimited(ip: string): boolean {
 }
 
 app.get("/api/search", async (c) => {
-  // If the connection comes from a trusted proxy, use x-forwarded-for to get
-  // the real client IP. Otherwise use the raw connection IP. This prevents
-  // spoofing x-forwarded-for from untrusted clients while still working correctly
-  // behind Nginx, Caddy, Traefik, etc. when TRUSTED_PROXY_IP is configured.
-  const connIp = (c.env as { requestIP?: { address: string } } | undefined)?.requestIP?.address ?? "";
-  const ip = (connIp && TRUSTED_PROXIES.has(connIp))
-    ? (c.req.header("x-forwarded-for")?.split(",")[0].trim() ?? connIp)
-    : (connIp || "anonymous");
+  // Use the real connection IP for rate limiting. x-forwarded-for is not used
+  // as it can be spoofed by clients. If connIp is unavailable, all requests
+  // share one "anonymous" bucket.
+  const connIp = (c.env as { requestIP?: { address: string } } | undefined)?.requestIP?.address;
+  const ip = connIp ?? "anonymous";
   if (isRateLimited(ip)) {
     return c.json({ error: "Too many requests" }, 429);
   }

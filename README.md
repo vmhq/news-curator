@@ -54,7 +54,6 @@ PORT=8391
 API_KEY=             # generar con: openssl rand -hex 32
 # CURATIONS_DIR=/data/curations
 # SITE_URL=https://example.com
-# TRUSTED_PROXY_IP=  # IP(s) del reverse proxy, ej: 127.0.0.1,::1
 ```
 
 El contenido se almacena en el volumen Docker `curations` y persiste entre reinicios.
@@ -126,7 +125,6 @@ DAILY_BRIEF_URL=       # URL base del servidor, ej: https://dailyb.vmhq.cl
 | `API_KEY` | — | API key para endpoints autenticados. Generar con `openssl rand -hex 32` |
 | `CURATIONS_DIR` | `/data/curations` | Directorio con los archivos Markdown de ediciones |
 | `SITE_URL` | `http://localhost:8391` | URL pública — usada en canonical y OG tags |
-| `TRUSTED_PROXY_IP` | — | IPs del reverse proxy confiable, separadas por coma (ej: `127.0.0.1,::1`). Cuando el request viene de una de estas IPs, se usa el header `x-forwarded-for` para el rate limiting de búsqueda |
 
 ## Seguridad
 
