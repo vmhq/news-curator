@@ -192,6 +192,27 @@ export function buildPage(
 
   <button id="scrollTopBtn" class="scroll-top" aria-label="Volver al inicio">↑</button>
 
+  <!-- Mobile floating TOC -->
+  <button id="mobileTocBtn" class="mobile-toc-fab" aria-label="Ver índice de la edición">
+    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round">
+      <line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="15" y2="12"/><line x1="3" y1="18" x2="18" y2="18"/>
+    </svg>
+  </button>
+  <div id="mobileTocPanel" class="mobile-toc-panel" aria-hidden="true">
+    <div class="mobile-toc-backdrop" id="mobileTocBackdrop"></div>
+    <div class="mobile-toc-sheet">
+      <div class="mobile-toc-header">
+        <span class="mobile-toc-title">En esta edición</span>
+        <button id="mobileTocClose" class="mobile-toc-close" aria-label="Cerrar índice">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round">
+            <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
+          </svg>
+        </button>
+      </div>
+      <nav id="mobileTocNav" class="mobile-toc-nav"></nav>
+    </div>
+  </div>
+
   <footer class="footer">
     <div class="footer-inner">
       <span>📰 Daily Brief — Noticias curadas por IA, entregadas diariamente.</span>
