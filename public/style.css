@@ -613,6 +613,7 @@ mark {
   .sidebar-heading { margin-top: 8px; }
 
   .scroll-top { bottom: 16px; right: 16px; width: 36px; height: 36px; font-size: 14px; }
+  .mobile-toc-fab { bottom: 16px; left: 16px; width: 36px; height: 36px; }
 }
 
 /* ─── Article Body ─── */
@@ -1096,8 +1097,8 @@ mark {
   position: fixed;
   bottom: 24px;
   left: 24px;
-  width: 44px;
-  height: 44px;
+  width: 40px;
+  height: 40px;
   border-radius: 50%;
   background: var(--blue);
   color: #fff;
