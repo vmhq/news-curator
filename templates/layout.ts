@@ -26,6 +26,7 @@ export function buildPage(
     sidebarHasPrev?: boolean;
     sidebarPage?: number;
     hideSidebar?: boolean;
+    readingTime?: number;
   } = {}
 ): string {
   const {
@@ -33,7 +34,7 @@ export function buildPage(
     prevDate, nextDate, featured, heroImage,
     canonicalPath = "/",
     sidebarHasMore = false, sidebarHasPrev = false, sidebarPage = 1,
-    hideSidebar = false,
+    hideSidebar = false, readingTime,
   } = meta;
 
   const canonicalUrl = `${SITE_URL}${canonicalPath}`;
@@ -41,11 +42,21 @@ export function buildPage(
     featured?.body ?? "Noticias de tecnología e inteligencia artificial curadas diariamente por IA.";
   const ogImage = heroImage ?? DEFAULT_COVER;
 
+  // Embed recent curations for the command palette (CSP-safe via data attribute)
+  const recentForPalette = recentCurations.slice(0, 6).map(c => ({
+    date: c.date,
+    summary: c.summary,
+    url: `/curacion/${c.date}`,
+    dateFormatted: formatDateEs(c.date),
+  }));
+  // JSON embedded via data attribute — escapeHtml handles safe embedding
+  const recentJson = escapeHtml(JSON.stringify(recentForPalette));
+
   const recentLinks = recentCurations
     .map(
       (c) =>
         `<a href="/curacion/${escapeHtml(c.date)}" class="recent-item${c.date === date ? " active" : ""}">
-      <span class="recent-date">${escapeHtml(formatDateEs(c.date))}</span>
+      <span class="recent-date" data-iso="${escapeHtml(c.date)}">${escapeHtml(formatDateEs(c.date))}</span>
       <span class="recent-headline">${escapeHtml(c.summary)}</span>
     </a>`
     )
@@ -69,10 +80,15 @@ export function buildPage(
     </div>`
       : "";
 
+  // Hero image — add loading class when there's a real image to show skeleton shimmer
   const heroImageHtml = heroImage
-    ? `<div class="hero-image"><img src="${escapeHtml(heroImage)}" alt="${escapeHtml(featured?.headline || "")}" loading="eager" onerror="this.parentElement.innerHTML='<div class=\\'hero-image-placeholder\\'><span class=\\'hero-emoji\\'>📰</span></div>'"></div>`
+    ? `<div class="hero-image loading" id="heroImageWrap"><img src="${escapeHtml(heroImage)}" alt="${escapeHtml(featured?.headline || "")}" loading="eager" id="heroImg" onerror="this.parentElement.classList.remove('loading');this.parentElement.innerHTML='<div class=\\'hero-image-placeholder\\'><span class=\\'hero-emoji\\'>📰</span></div>'"></div>`
     : featured
     ? `<div class="hero-image"><div class="hero-image-placeholder"><span class="hero-emoji">📰</span></div></div>`
+    : "";
+
+  const readingTimeMeta = readingTime
+    ? `<span class="hero-dot">·</span><span>${readingTime} min de lectura</span>`
     : "";
 
   const heroHtml = featured
@@ -86,10 +102,21 @@ export function buildPage(
         <div class="hero-meta">
           ${date ? `<span>${formatDateEs(date)}</span>` : ""}
           ${generatedAt ? `<span class="hero-dot">·</span><span>${escapeHtml(generatedAt)}</span>` : ""}
+          ${readingTimeMeta}
         </div>
       </div>
     </section>`
     : "";
+
+  const sidebarHtml = hideSidebar ? "" : `<aside class="sidebar">
+        <div id="tocContainer" class="toc-container" hidden>
+          <h3 class="sidebar-heading">En esta edición</h3>
+          <nav id="tocNav" class="toc-nav"></nav>
+        </div>
+        <h3 class="sidebar-heading">Ediciones Recientes</h3>
+        <div class="recent-list">${recentLinks || '<p class="empty-text">Sin ediciones aún</p>'}</div>
+        ${sidebarPaginationHtml}
+      </aside>`;
 
   return `<!DOCTYPE html>
 <html lang="es" data-theme="light">
@@ -129,10 +156,11 @@ export function buildPage(
         <a href="/ediciones" class="nav-link">Ediciones</a>
       </div>
       <div class="nav-actions">
-        <div class="search-box">
-          <input type="search" id="searchInput" placeholder="Buscar ediciones..." class="search-input" autocomplete="off">
-          <div id="searchResults" class="search-dropdown"></div>
-        </div>
+        <button id="cmdTrigger" class="cmd-trigger" aria-label="Buscar ediciones (⌘K)">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
+          <span class="cmd-trigger-label">Buscar</span>
+          <kbd class="cmd-trigger-kbd">⌘K</kbd>
+        </button>
         <button id="themeToggle" class="theme-btn" aria-label="Cambiar tema">
           <svg class="icon-auto" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8M12 17v4"/></svg>
           <svg class="icon-sun" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="5"/><path d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"/></svg>
@@ -153,15 +181,7 @@ export function buildPage(
     ${heroHtml}
     <div class="content-layout${hideSidebar ? " content-full" : ""}">
       <article class="article-body">${body}</article>
-      ${
-        hideSidebar
-          ? ""
-          : `<aside class="sidebar">
-        <h3 class="sidebar-heading">Ediciones Recientes</h3>
-        <div class="recent-list">${recentLinks || '<p class="empty-text">Sin ediciones aún</p>'}</div>
-        ${sidebarPaginationHtml}
-      </aside>`
-      }
+      ${sidebarHtml}
     </div>
     ${navHtml}
   </main>
@@ -174,6 +194,21 @@ export function buildPage(
       <span class="footer-copy">Creado con 🤖 por Hermes Agent</span>
     </div>
   </footer>
+
+  <!-- Command Palette -->
+  <div id="cmdOverlay" class="cmd-overlay" role="dialog" aria-modal="true" aria-label="Buscar ediciones">
+    <div class="cmd-palette">
+      <div class="cmd-search-row">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" class="cmd-search-icon"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
+        <input type="text" id="cmdInput" class="cmd-input" placeholder="Buscar ediciones..." autocomplete="off" spellcheck="false">
+        <kbd class="cmd-esc-hint">Esc</kbd>
+      </div>
+      <div id="cmdResults" class="cmd-results"></div>
+    </div>
+  </div>
+
+  <!-- Recent data for command palette (CSP-safe) -->
+  <div id="recentData" data-recent="${recentJson}" hidden></div>
 
   <script src="/static/app.js"></script>
 </body>

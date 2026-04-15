@@ -256,6 +256,11 @@ export function allEditionsSidebar(files: string[]): string[] {
   return files;
 }
 
+export function estimateReadingTime(raw: string): number {
+  const words = raw.trim().split(/\s+/).length;
+  return Math.max(1, Math.ceil(words / 200));
+}
+
 export function formatDateEs(dateStr: string): string {
   const cleanDate = dateFromFileId(dateStr);
   const dt = new Date(cleanDate + "T12:00:00");

@@ -19,6 +19,7 @@ import {
   dateFromFileId,
   todayLocal,
   formatDateEs,
+  estimateReadingTime,
   invalidateFilesCache,
   invalidateSummaryCache,
 } from "./lib/curations.ts";
@@ -302,6 +303,7 @@ app.get("/", async (c) => {
   const genTimeMatch = curation.raw.match(/\*Generated at (.+?)\*/);
   const generatedAt = genTimeMatch ? genTimeMatch[1] : undefined;
   const featured = extractFeatured(curation.raw);
+  const readingTime = estimateReadingTime(curation.raw);
 
   let heroImage: string | null = curation.coverImage;
   if (!heroImage && featured?.firstUrl) {
@@ -332,7 +334,7 @@ app.get("/", async (c) => {
     buildPage(`Daily Brief — ${formatDateEs(targetDate)}`, curation.html, {
       date: targetDate, isToday, generatedAt, recentCurations, prevDate, nextDate, featured, heroImage,
       canonicalPath: isToday ? "/" : `/curacion/${targetDate}`,
-      sidebarHasMore, sidebarHasPrev, sidebarPage,
+      sidebarHasMore, sidebarHasPrev, sidebarPage, readingTime,
     })
   );
 });
@@ -363,6 +365,7 @@ app.get("/curacion/:date", async (c) => {
   const genTimeMatch = curation.raw.match(/\*Generated at (.+?)\*/);
   const generatedAt = genTimeMatch ? genTimeMatch[1] : undefined;
   const featured = extractFeatured(curation.raw);
+  const readingTime = estimateReadingTime(curation.raw);
 
   let heroImage: string | null = curation.coverImage;
   if (!heroImage && featured?.firstUrl) {
@@ -387,6 +390,7 @@ app.get("/curacion/:date", async (c) => {
       generatedAt, recentCurations, prevDate, nextDate, featured, heroImage,
       canonicalPath: `/curacion/${date}`,
       sidebarHasMore: allEditions.length > 8, sidebarHasPrev: false, sidebarPage: 1,
+      readingTime,
     })
   );
 });
