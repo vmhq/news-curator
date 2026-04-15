@@ -836,6 +836,11 @@ mark {
   top: calc(var(--nav-height) + 24px);
   align-self: start;
   animation: fadeInUp 0.45s ease 0.2s both;
+  /* Cap to viewport so the TOC never gets pushed out of view */
+  max-height: calc(100vh - var(--nav-height) - 48px);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
 }
 
 .sidebar-heading {
@@ -844,14 +849,20 @@ mark {
   text-transform: uppercase;
   letter-spacing: 1.5px;
   color: var(--text-muted);
-  margin-bottom: 16px;
-  padding-bottom: 12px;
-  border-bottom: 2px solid var(--border);
+  margin-bottom: 12px;
+  padding-bottom: 10px;
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
 }
 
 /* ─── Table of Contents ─── */
 .toc-container {
-  margin-bottom: 28px;
+  flex: 1 1 auto;
+  min-height: 0;        /* required for flex overflow to work */
+  overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: var(--border) transparent;
+  padding-bottom: 4px;
 }
 
 .toc-container[hidden] { display: none; }
@@ -859,18 +870,17 @@ mark {
 .toc-nav {
   display: flex;
   flex-direction: column;
-  gap: 2px;
 }
 
+/* Minimalist left-rule style — no background fill, just color + border */
 .toc-item {
   display: block;
-  font-size: 13px;
-  color: var(--text-secondary) !important;
+  font-size: 12.5px;
+  color: var(--text-muted) !important;
   text-decoration: none !important;
-  padding: 7px 12px;
-  border-radius: var(--radius);
-  border-left: 3px solid transparent;
-  transition: all var(--transition);
+  padding: 5px 8px 5px 12px;
+  border-left: 2px solid var(--border-light);
+  transition: color var(--transition), border-color var(--transition);
   line-height: 1.4;
   white-space: nowrap;
   overflow: hidden;
@@ -878,47 +888,64 @@ mark {
 }
 
 .toc-item:hover {
-  background: linear-gradient(90deg, var(--blue-light), transparent);
-  border-left-color: var(--blue);
-  color: var(--text) !important;
+  color: var(--text-secondary) !important;
+  border-left-color: var(--text-muted);
 }
 
 .toc-item.active {
-  background: linear-gradient(90deg, var(--blue-light), transparent);
-  border-left-color: var(--blue);
   color: var(--blue) !important;
+  border-left-color: var(--blue);
   font-weight: 600;
 }
 
 .toc-item.toc-h3 {
-  font-size: 12px;
-  padding-left: 20px;
+  font-size: 11.5px;
+  padding-left: 22px;
   color: var(--text-muted) !important;
 }
 
 .toc-item.toc-h3.active { color: var(--blue) !important; }
 
+/* ─── Recent section ─── */
+.recent-section {
+  flex-shrink: 0;
+  border-top: 1px solid var(--border);
+  padding-top: 16px;
+  margin-top: 8px;
+  overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: var(--border) transparent;
+  /* Show at most ~3 items when TOC is tall; expands when no TOC */
+  max-height: 260px;
+}
+
+/* When there's no TOC, recent section can use all the space */
+.sidebar:not(:has(.toc-container:not([hidden]))) .recent-section {
+  max-height: none;
+  border-top: none;
+  padding-top: 0;
+  margin-top: 0;
+}
+
 /* ─── Recent list ─── */
-.recent-list { display: flex; flex-direction: column; gap: 2px; }
+.recent-list { display: flex; flex-direction: column; }
 
 .recent-item {
   display: block;
-  padding: 12px;
-  border-radius: var(--radius);
+  padding: 9px 8px 9px 12px;
+  border-left: 2px solid transparent;
   color: var(--text) !important;
   text-decoration: none !important;
-  transition: all var(--transition);
-  border-left: 3px solid transparent;
+  transition: color var(--transition), border-color var(--transition);
 }
 
 .recent-item:hover {
-  background: linear-gradient(90deg, var(--blue-light), transparent);
-  border-left-color: var(--blue);
+  border-left-color: var(--text-muted);
+  color: var(--text) !important;
 }
 
 .recent-item.active {
-  background: linear-gradient(90deg, var(--blue-light), transparent);
-  border-left: 4px solid var(--blue);
+  border-left-color: var(--blue);
 }
 
 .recent-date {

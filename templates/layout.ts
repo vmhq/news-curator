@@ -113,9 +113,11 @@ export function buildPage(
           <h3 class="sidebar-heading">En esta edición</h3>
           <nav id="tocNav" class="toc-nav"></nav>
         </div>
-        <h3 class="sidebar-heading">Ediciones Recientes</h3>
-        <div class="recent-list">${recentLinks || '<p class="empty-text">Sin ediciones aún</p>'}</div>
-        ${sidebarPaginationHtml}
+        <div class="recent-section">
+          <h3 class="sidebar-heading">Ediciones Recientes</h3>
+          <div class="recent-list">${recentLinks || '<p class="empty-text">Sin ediciones aún</p>'}</div>
+          ${sidebarPaginationHtml}
+        </div>
       </aside>`;
 
   return `<!DOCTYPE html>
