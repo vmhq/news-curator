@@ -61,6 +61,11 @@
 /* ─── Reset ─── */
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
+/* Offset scroll-to-anchor by sticky navbar height + breathing room */
+html {
+  scroll-padding-top: calc(var(--nav-height) + 20px);
+}
+
 body {
   font-family: var(--font);
   background: var(--bg);
