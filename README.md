@@ -35,8 +35,10 @@ services:
       PORT: "8391"
       API_KEY: "${API_KEY}"
       CURATIONS_DIR: "/data/curations"
+      UPLOADS_DIR: "/data/uploads"
     volumes:
       - curations:/data/curations
+      - uploads:/data/uploads
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://localhost:8391/health"]
       interval: 30s
@@ -46,6 +48,7 @@ services:
 
 volumes:
   curations:
+  uploads:
 ```
 
 **`.env`**
@@ -54,9 +57,10 @@ PORT=8391
 API_KEY=             # generar con: openssl rand -hex 32
 # CURATIONS_DIR=/data/curations
 # SITE_URL=https://example.com
+# UPLOADS_DIR=/data/uploads
 ```
 
-El contenido se almacena en el volumen Docker `curations` y persiste entre reinicios.
+Las curaciones y las imágenes subidas se almacenan en volúmenes Docker nombrados (`curations` y `uploads`) y persisten entre reinicios y rebuilds.
 
 ## Desarrollo local (sin Docker)
 
