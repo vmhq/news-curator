@@ -155,6 +155,62 @@ document.addEventListener("DOMContentLoaded", () => {
     headingEls.forEach((el) => observer.observe(el));
   }
 
+  // ─── Mobile Floating TOC ──────────────────────────────────────
+  const mobileTocBtn     = document.getElementById("mobileTocBtn");
+  const mobileTocPanel   = document.getElementById("mobileTocPanel");
+  const mobileTocClose   = document.getElementById("mobileTocClose");
+  const mobileTocBackdrop = document.getElementById("mobileTocBackdrop");
+  const mobileTocNavEl   = document.getElementById("mobileTocNav");
+
+  if (mobileTocNavEl && h2Entries.length >= 2) {
+    // Populate with the same headings as the desktop TOC
+    tocHeadings.forEach(({ id, text, level }) => {
+      const cleanText = text.replace(/^[\p{Emoji_Presentation}\p{Extended_Pictographic}\uFE0F\u200D]+\s*/u, "").trim();
+      const a = document.createElement("a");
+      a.href = `#${id}`;
+      a.className = `mobile-toc-item${level === "H3" ? " mobile-toc-h3" : ""}`;
+      a.textContent = cleanText || text;
+      a.addEventListener("click", (e) => {
+        e.preventDefault();
+        closeMobileToc();
+        const target = document.getElementById(id);
+        if (target) {
+          history.pushState(null, "", `#${id}`);
+          // Small delay lets the panel animate closed before scroll
+          setTimeout(() => target.scrollIntoView({ behavior: "smooth", block: "start" }), 180);
+        }
+      });
+      mobileTocNavEl.appendChild(a);
+    });
+
+    // Show the FAB
+    mobileTocBtn?.classList.add("visible");
+  }
+
+  function openMobileToc() {
+    mobileTocPanel?.classList.add("open");
+    mobileTocPanel?.setAttribute("aria-hidden", "false");
+    mobileTocBtn?.setAttribute("aria-expanded", "true");
+  }
+
+  function closeMobileToc() {
+    mobileTocPanel?.classList.remove("open");
+    mobileTocPanel?.setAttribute("aria-hidden", "true");
+    mobileTocBtn?.setAttribute("aria-expanded", "false");
+  }
+
+  mobileTocBtn?.addEventListener("click", () => {
+    mobileTocPanel?.classList.contains("open") ? closeMobileToc() : openMobileToc();
+  });
+
+  mobileTocClose?.addEventListener("click", closeMobileToc);
+  mobileTocBackdrop?.addEventListener("click", closeMobileToc);
+
+  // Close on Escape
+  document.addEventListener("keydown", (e) => {
+    if (e.key === "Escape" && mobileTocPanel?.classList.contains("open")) closeMobileToc();
+  });
+
   // ─── Relative Dates (sidebar) ─────────────────────────────────
   const today = new Date();
   today.setHours(0, 0, 0, 0);

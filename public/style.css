@@ -1090,6 +1090,166 @@ mark {
 ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
 ::-webkit-scrollbar-thumb:hover { background: var(--text-muted); }
 
+/* ─── Mobile Floating TOC ─── */
+.mobile-toc-fab {
+  display: none; /* only shown on mobile via media query */
+  position: fixed;
+  bottom: 24px;
+  left: 24px;
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  background: var(--blue);
+  color: #fff;
+  border: none;
+  cursor: pointer;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 4px 12px rgba(14,165,233,0.4);
+  z-index: 50;
+  transition: background var(--transition), transform var(--transition), box-shadow var(--transition);
+}
+
+.mobile-toc-fab:hover {
+  background: var(--blue-hover);
+  transform: translateY(-2px);
+  box-shadow: 0 6px 16px rgba(14,165,233,0.5);
+}
+
+.mobile-toc-panel { display: none; }
+
+@media (max-width: 768px) {
+  /* Hide sidebar TOC — floating FAB replaces it */
+  .toc-container { display: none !important; }
+
+  /* Show FAB when JS adds .visible */
+  .mobile-toc-fab.visible { display: flex; }
+
+  /* Panel wrapper — full-screen overlay container */
+  .mobile-toc-panel {
+    display: block;
+    position: fixed;
+    inset: 0;
+    z-index: 150;
+    pointer-events: none;
+    visibility: hidden;
+  }
+
+  .mobile-toc-panel.open {
+    pointer-events: auto;
+    visibility: visible;
+  }
+
+  /* Backdrop */
+  .mobile-toc-backdrop {
+    position: absolute;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.5);
+    backdrop-filter: blur(2px);
+    -webkit-backdrop-filter: blur(2px);
+    opacity: 0;
+    transition: opacity 0.25s ease;
+  }
+
+  .mobile-toc-panel.open .mobile-toc-backdrop { opacity: 1; }
+
+  /* Bottom sheet */
+  .mobile-toc-sheet {
+    position: absolute;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    background: var(--bg-card);
+    border-radius: 16px 16px 0 0;
+    max-height: 72vh;
+    display: flex;
+    flex-direction: column;
+    transform: translateY(100%);
+    transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    box-shadow: 0 -4px 24px rgba(0, 0, 0, 0.2);
+    padding-bottom: env(safe-area-inset-bottom, 0px);
+  }
+
+  .mobile-toc-panel.open .mobile-toc-sheet { transform: translateY(0); }
+
+  /* Drag handle indicator */
+  .mobile-toc-sheet::before {
+    content: "";
+    display: block;
+    width: 36px;
+    height: 4px;
+    background: var(--border);
+    border-radius: 2px;
+    margin: 10px auto 0;
+    flex-shrink: 0;
+  }
+
+  .mobile-toc-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 12px 20px 12px;
+    border-bottom: 1px solid var(--border);
+    flex-shrink: 0;
+  }
+
+  .mobile-toc-title {
+    font-size: 11px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 1.5px;
+    color: var(--text-muted);
+  }
+
+  .mobile-toc-close {
+    background: none;
+    border: none;
+    cursor: pointer;
+    color: var(--text-muted);
+    padding: 4px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: color var(--transition);
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  .mobile-toc-close:hover { color: var(--text); }
+
+  /* Scrollable TOC items */
+  .mobile-toc-nav {
+    display: flex;
+    flex-direction: column;
+    overflow-y: auto;
+    padding: 8px 0 20px;
+    overscroll-behavior: contain;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .mobile-toc-item {
+    display: block;
+    font-size: 14.5px;
+    color: var(--text-secondary) !important;
+    text-decoration: none !important;
+    padding: 11px 20px;
+    border-left: 2px solid transparent;
+    transition: color var(--transition), border-color var(--transition), background var(--transition);
+    line-height: 1.4;
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  .mobile-toc-item:active {
+    background: var(--blue-light);
+  }
+
+  .mobile-toc-item.mobile-toc-h3 {
+    font-size: 13px;
+    padding-left: 36px;
+    color: var(--text-muted) !important;
+  }
+}
+
 /* ─── Reduced motion ─── */
 @media (prefers-reduced-motion: reduce) {
   .hero, .hero-image, .hero-content, .article-body, .sidebar {
