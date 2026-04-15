@@ -50,17 +50,9 @@ volumes:
 
 **`.env`**
 ```bash
-# Puerto expuesto al host
 PORT=8391
-
-# API key para POST /api/publish — debe ser un valor secreto
-# Generar con: openssl rand -hex 32
-API_KEY=
-
-# Ruta a los archivos de curación (sobreescrita en docker-compose)
+API_KEY=          # generar con: openssl rand -hex 32
 # CURATIONS_DIR=/data/curations
-
-# URL pública del sitio — para URLs canónicas y OG tags
 # SITE_URL=https://example.com
 ```
 
@@ -88,86 +80,25 @@ news-curator/
 │   ├── style.css          # Estilos (light/dark, responsive)
 │   ├── app.js             # JS cliente (tema, búsqueda, menú)
 │   ├── favicon.svg
-│   └── cover.svg          # Imagen de portada fallback
+│   ├── cover.svg          # Imagen de portada fallback
+│   └── uploads/           # Imágenes subidas via API (creado automáticamente)
 ├── .claude/
 │   └── commands/
-│       └── curar.md       # Skill del agente AI para publicar ediciones
-├── CURATION_SPEC.md       # Especificación completa del formato markdown
+│       └── curar.md       # Skill del agente AI — formato markdown + API completa
 ├── CLAUDE.md              # Instrucciones para Claude Code
 ├── Dockerfile
 ├── docker-compose.yml
 └── .env.example
 ```
 
-## Rutas HTTP
-
-| Método | Ruta | Descripción |
-|--------|------|-------------|
-| `GET` | `/` | Edición más reciente; `?p=N` pagina el sidebar |
-| `GET` | `/curacion/:date` | Edición por ID (`YYYY-MM-DD` o `YYYY-MM-DD_HH-MM`) |
-| `GET` | `/ediciones` | Lista completa de ediciones |
-| `GET` | `/api/curations` | JSON paginado (`?page=&limit=`) |
-| `GET` | `/api/search` | Búsqueda full-text (`?q=`) |
-| `GET` | `/health` | Estado del servidor |
-| `POST` | `/api/publish` | Publicar nueva edición (requiere `X-Api-Key`) |
-| `GET` | `/api/curations/:date` | Markdown raw de una edición |
-| `PUT` | `/api/curations/:date` | Reemplazar contenido de edición existente (requiere `X-Api-Key`) |
-| `PATCH` | `/api/curations/:date/meta` | Actualizar solo frontmatter (requiere `X-Api-Key`) |
-
-## API de publicación y edición
-
-Autenticación via header `X-Api-Key` o `Authorization: Bearer <key>`.
-
-**Publicar nueva edición:**
-
-```bash
-curl -X POST http://localhost:8391/api/publish \
-  -H "X-Api-Key: TU_API_KEY" \
-  -H "Content-Type: text/markdown" \
-  --data-binary @curación.md
-```
-
-**Respuesta (201):**
-```json
-{ "success": true, "edition": "2026-04-09_14-30", "url": "/curacion/2026-04-09_14-30" }
-```
-
-**Leer markdown raw:**
-```bash
-curl http://localhost:8391/api/curations/2026-04-09_14-30
-# → { "edition": "...", "content": "---\nimage_url: ...\n---\n..." }
-```
-
-**Editar edición completa (PUT):**
-```bash
-curl -X PUT http://localhost:8391/api/curations/2026-04-09_14-30 \
-  -H "X-Api-Key: TU_API_KEY" \
-  -H "Content-Type: text/markdown" \
-  --data-binary @curación-corregida.md
-```
-
-**Editar solo el frontmatter (PATCH):**
-```bash
-curl -X PATCH http://localhost:8391/api/curations/2026-04-09_14-30/meta \
-  -H "X-Api-Key: TU_API_KEY" \
-  -H "Content-Type: application/json" \
-  -d '{"image_url": "https://nueva-imagen.com/foto.jpg"}'
-# Enviar null elimina el campo. El cuerpo markdown no se toca.
-```
-
-POST y PUT validan `image_url` con un HEAD request; si no es accesible o no es imagen, incluyen un campo `warning` en la respuesta (sin bloquear el guardado). Los cambios se publican de inmediato — el caché de resúmenes se invalida automáticamente.
-
-**Paginación con cursor** (`GET /api/curations`):
-```
-?before=2026-04-09&limit=10   →  { curations, nextCursor, total }
-```
-Compatible con el modo clásico `?page=&limit=` — ambos devuelven `nextCursor`.
-
-Ver [`CURATION_SPEC.md`](./CURATION_SPEC.md) para el formato completo del archivo markdown y [`.claude/commands/curar.md`](./.claude/commands/curar.md) para el skill del agente.
-
 ## Integración con agentes AI
 
-Daily Brief está diseñado para ser operado por agentes AI. El proyecto incluye skills de Claude Code que automatizan la curación, redacción y publicación de ediciones.
+Daily Brief está diseñado para ser operado por agentes AI. El skill principal está en [`.claude/commands/curar.md`](./.claude/commands/curar.md) — es el documento único de referencia para publicar, editar y gestionar ediciones. Incluye:
+
+- La estructura completa del archivo markdown que se debe subir
+- Reglas de formato y errores comunes
+- Referencia completa de la API (publicar, editar, subir imágenes)
+- Flujo autónomo paso a paso
 
 ### Skills disponibles
 
@@ -186,47 +117,30 @@ DAILY_BRIEF_API_KEY=   # API key para los endpoints autenticados (= API_KEY del 
 DAILY_BRIEF_URL=       # URL base del servidor, ej: https://dailyb.vmhq.cl
 ```
 
-### Especificaciones para el agente
+## Rutas HTTP
 
-| Archivo | Contenido |
-|---------|-----------|
-| [`.claude/commands/curar.md`](./.claude/commands/curar.md) | Skill principal — proceso, formato markdown, reglas críticas y ejemplos de curl |
-| [`CURATION_SPEC.md`](./CURATION_SPEC.md) | Especificación completa del formato — cada sección explicada con ejemplos y errores comunes |
+| Método | Ruta | Descripción |
+|--------|------|-------------|
+| `GET` | `/` | Edición más reciente; `?p=N` pagina el sidebar |
+| `GET` | `/curacion/:date` | Edición por ID (`YYYY-MM-DD` o `YYYY-MM-DD_HH-MM`) |
+| `GET` | `/ediciones` | Lista completa de ediciones |
+| `GET` | `/api/curations` | JSON paginado (`?page=&limit=` o `?before=&limit=`) |
+| `GET` | `/api/search` | Búsqueda full-text (`?q=`) |
+| `GET` | `/health` | Estado del servidor |
+| `POST` | `/api/publish` | Publicar nueva edición (requiere `X-Api-Key`) |
+| `GET` | `/api/curations/:date` | Markdown raw de una edición |
+| `PUT` | `/api/curations/:date` | Reemplazar contenido de edición existente (requiere `X-Api-Key`) |
+| `PATCH` | `/api/curations/:date/meta` | Actualizar solo frontmatter (requiere `X-Api-Key`) |
+| `POST` | `/api/images` | Subir imagen propia para usar como portada (requiere `X-Api-Key`) |
 
-## Formato del contenido
-
-Los archivos siguen la convención `YYYY-MM-DD_HH-MM.md`. Estructura esperada:
-
-```markdown
----
-image_url: https://...        ← imagen hero (opcional)
----
-# Título de la edición
-*Generado el ...*
----
-## 🔥 Featured Story: TITULAR  ← noticia principal (hero + cuerpo). El emoji 🔥 es obligatorio; "Featured Story:" es opcional.
-
-Primer párrafo con [enlace principal](https://url.com).
-
----
-## Sección de Noticias
-
-### [Titular del artículo](https://url.com)
-Resumen de 2–3 oraciones.
-
----
-## 🔗 Quick Links
-
-- **[Recurso](https://url.com)** — descripción breve.
-```
-
-Ver [`CURATION_SPEC.md`](./CURATION_SPEC.md) para la referencia completa.
+Ver [`.claude/commands/curar.md`](./.claude/commands/curar.md) para la referencia completa de la API y el formato del contenido.
 
 ## Características
 
 - Múltiples ediciones por día con sufijo horario en el nombre de archivo
 - Timezone `America/Santiago` para determinar la edición del día
 - Imagen hero desde frontmatter → og:image del artículo destacado → portada por defecto
+- Subida de imágenes propias via `POST /api/images` (jpeg, png, webp, gif, avif — máx 10 MB)
 - Caché en memoria con invalidación automática vía watcher de directorio
 - Tema claro/oscuro (localStorage + `prefers-color-scheme`)
 - Búsqueda full-text con debounce

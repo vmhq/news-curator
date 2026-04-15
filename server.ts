@@ -56,6 +56,57 @@ function isValidApiKey(provided: string): boolean {
   return timingSafeEqual(Buffer.from(provided), Buffer.from(API_KEY));
 }
 
+// ── Image upload API ──────────────────────────────────────────────────────────
+
+const UPLOADS_DIR = join("public", "uploads");
+const MAX_IMAGE_SIZE = 10 * 1024 * 1024; // 10 MB
+const ALLOWED_IMAGE_TYPES = new Set(["image/jpeg", "image/png", "image/webp", "image/gif", "image/avif"]);
+const IMAGE_EXT: Record<string, string> = {
+  "image/jpeg": "jpg", "image/png": "png", "image/webp": "webp",
+  "image/gif": "gif", "image/avif": "avif",
+};
+
+app.use("/api/images", async (c, next) => {
+  if (!API_KEY) return c.json({ error: "Upload endpoint disabled: API_KEY not configured" }, 503);
+  const key =
+    c.req.header("X-Api-Key") ??
+    c.req.header("Authorization")?.replace(/^Bearer\s+/i, "");
+  if (!key || !isValidApiKey(key)) return c.json({ error: "Unauthorized" }, 401);
+  await next();
+});
+
+app.post("/api/images", async (c) => {
+  let formData: FormData;
+  try {
+    formData = await c.req.formData();
+  } catch {
+    return c.json({ error: "Request must be multipart/form-data" }, 400);
+  }
+
+  const file = formData.get("image");
+  if (!(file instanceof File)) return c.json({ error: "Missing 'image' file field" }, 400);
+
+  if (!ALLOWED_IMAGE_TYPES.has(file.type)) {
+    return c.json({ error: `Tipo no permitido: ${file.type}. Permitidos: jpeg, png, webp, gif, avif` }, 400);
+  }
+  if (file.size > MAX_IMAGE_SIZE) {
+    return c.json({ error: `Imagen demasiado grande (máx 10 MB, recibido ${(file.size / 1024 / 1024).toFixed(1)} MB)` }, 400);
+  }
+
+  const ext = IMAGE_EXT[file.type];
+  const ts = Date.now();
+  const rand = Math.random().toString(36).slice(2, 8);
+  const filename = `${ts}-${rand}.${ext}`;
+
+  await mkdir(UPLOADS_DIR, { recursive: true });
+  await writeFile(join(UPLOADS_DIR, filename), Buffer.from(await file.arrayBuffer()));
+
+  const url = `/static/uploads/${filename}`;
+  return c.json({ success: true, url }, 201);
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+
 app.use("/api/publish", async (c, next) => {
   if (!API_KEY) return c.json({ error: "Publish endpoint disabled: API_KEY not configured" }, 503);
   const key =
@@ -104,6 +155,17 @@ app.post("/api/publish", async (c) => {
 
 /** HEAD-check image_url from frontmatter; returns a warning string or null. */
 async function validateImageUrl(url: string): Promise<string | null> {
+  // Local uploaded images — validate by file existence, not HTTP
+  if (url.startsWith("/static/uploads/")) {
+    const filename = url.slice("/static/uploads/".length);
+    if (!filename || filename.includes("..") || filename.includes("/")) {
+      return "image_url local inválida";
+    }
+    if (!existsSync(join(UPLOADS_DIR, filename))) {
+      return "image_url apunta a un archivo subido que no existe";
+    }
+    return null;
+  }
   if (isBlockedUrl(url)) return "image_url points to a blocked or internal address";
   try {
     const controller = new AbortController();
