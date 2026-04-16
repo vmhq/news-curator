@@ -75,14 +75,14 @@ PORT=3000 bun run start
 
 ```
 news-curator/
-├── server.ts              # Rutas y lógica principal
+├── server.ts              # Rutas, endpoints API y middleware
 ├── lib/
-│   └── curations.ts       # I/O, caché, parsing, utilidades de fecha
+│   └── curations.ts       # I/O, caché en memoria, parsing, utilidades de fecha
 ├── templates/
-│   └── layout.ts          # buildPage() — HTML completo
+│   └── layout.ts          # buildPage() — HTML completo + escapeHtml
 ├── public/
 │   ├── style.css          # Estilos (light/dark, responsive)
-│   ├── app.js             # JS cliente (tema, búsqueda, menú)
+│   ├── app.js             # JS cliente (tema, búsqueda, menú, TOC móvil)
 │   ├── favicon.svg
 │   ├── cover.svg          # Imagen de portada fallback
 │   └── uploads/           # Imágenes subidas via API (creado automáticamente)
@@ -165,7 +165,11 @@ Ver [`.claude/commands/curar.md`](./.claude/commands/curar.md) para la referenci
 - Timezone `America/Santiago` para determinar la edición del día
 - Imagen hero desde frontmatter → og:image del artículo destacado → portada por defecto
 - Subida de imágenes propias via `POST /api/images` (jpeg, png, webp, gif, avif — máx 10 MB)
-- Caché en memoria con invalidación automática vía watcher de directorio
+- Caché en memoria con invalidación automática vía watcher de directorio (`fs.watch`)
+- API de edición: `PUT /api/curations/:date` (reemplazar contenido) y `PATCH /api/curations/:date/meta` (actualizar solo frontmatter)
+- Paginación cursor-based en `/api/curations` (`?before=&limit=`) además de offset (`?page=&limit=`)
+- Tiempo estimado de lectura por edición
+- TOC flotante móvil con panel bottom-sheet
 - Tema claro/oscuro (localStorage + `prefers-color-scheme`)
 - Búsqueda full-text con debounce
 - Sidebar paginado (8 ediciones/página)
