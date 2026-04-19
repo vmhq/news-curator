@@ -24,7 +24,7 @@
   --radius-sm: 8px;
   --shadow: rgba(15, 31, 51, 0.15);
   --max-width: 1200px;
-  --nav-height: 64px;
+  --nav-height: 112px;
   --transition: 0.18s ease;
 
   --serif: 'Instrument Serif', 'Newsreader', Georgia, serif;
@@ -597,6 +597,7 @@ img { display: block; max-width: 100%; }
 }
 
 .article-body > h2 {
+  scroll-margin-top: calc(var(--nav-height) + 24px);
   counter-increment: section;
   font-family: var(--serif);
   font-size: clamp(28px, 3.2vw, 36px);
@@ -632,6 +633,7 @@ img { display: block; max-width: 100%; }
 }
 
 .article-body h3 {
+  scroll-margin-top: calc(var(--nav-height) + 24px);
   font-family: var(--serif);
   font-size: 26px;
   font-weight: 400;
