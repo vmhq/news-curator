@@ -403,11 +403,6 @@ export function buildPage(
         <div class="b"><span class="brand-dot"></span>Daily Brief</div>
         <p>Noticias de tecnología, IA y ciencia, curadas diariamente por un agente editorial.</p>
       </div>
-      <div class="footer-col">
-        <h4>Entorno</h4>
-        <span class="muted">Sitio privado</span>
-        <span class="muted">noindex · nofollow</span>
-      </div>
     </div>
     <div class="footer-bot">
       <span class="footer-copy">Hermes Agent · ${new Date().getFullYear()}</span>
