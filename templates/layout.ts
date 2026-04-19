@@ -347,9 +347,7 @@ export function buildPage(
       </button>
     </div>
     <div class="segmented">
-      <div class="seg-wrap">
-        ${segTabsHtml}
-      </div>
+      ${isArchive ? "" : `<div class="seg-wrap">${segTabsHtml}</div>`}
       <div class="seg-meta">
         <span class="live-dot"></span>
         <span>${editionMeta}</span>

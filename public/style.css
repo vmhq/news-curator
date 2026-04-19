@@ -1473,7 +1473,6 @@ mark {
   .nav-links { display: none; }
   .hamburger { display: flex; }
   .nav-inner { gap: 16px; grid-template-columns: auto 1fr auto; }
-  .segmented .nav-actions { display: none; }
 }
 
 @media (max-width: 768px) {
@@ -1481,7 +1480,8 @@ mark {
     padding: 14px 20px 10px;
     gap: 12px;
   }
-  .segmented { padding: 0 20px 12px; }
+  .segmented { padding: 0 20px 12px; gap: 10px; }
+  .seg-meta { display: none; }
   .mag { padding: 32px 20px 64px; }
   .content-layout { padding: 0 20px 40px; gap: 40px; }
   .pagination { padding: 0 20px 48px; }
@@ -1489,7 +1489,13 @@ mark {
   .pill-btn .kbd,
   .cmd-trigger-label,
   .cmd-trigger-kbd { display: none; }
-  .pill-btn, .cmd-trigger { padding: 8px; border-radius: 999px; }
+  .cmd-trigger {
+    width: 38px;
+    height: 38px;
+    padding: 0;
+    border-radius: 50%;
+    justify-content: center;
+  }
   .hero {
     padding-bottom: 40px;
     margin-bottom: 36px;
