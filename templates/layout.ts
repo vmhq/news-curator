@@ -246,13 +246,6 @@ export function buildPage(
           <div class="recent-list recent">${recentLinks || '<p class="empty-text">Sin ediciones aún</p>'}</div>
           ${sidebarPaginationHtml}
         </div>
-        <div class="digest">
-          <div class="digest-blob"></div>
-          <span class="digest-eyebrow">Digest diario</span>
-          <h3 class="digest-t">Curado cada mañana, listo cuando tú.</h3>
-          <p class="digest-p">Una edición, los titulares que importan, un par de minutos de lectura.</p>
-          <span class="digest-hint">◉ Sitio privado</span>
-        </div>
       </aside>`;
 
   // Edition strip meta (shown in the segmented row)
@@ -260,17 +253,34 @@ export function buildPage(
     ? `EDICIÓN · ${escapeHtml(formatDateShort(date))}${generatedAt ? ` · ACTUALIZADA ${escapeHtml(generatedAt)}` : ""}`
     : "DAILY BRIEF";
 
-  // Feed layout — extracted from body HTML
+  // Feed layout — featured story as #1, then extracted body items
   const feedItems = isHomeOrEdition && featured ? buildFeedItems(body) : [];
-  const feedHtml = feedItems.length > 0
+  const totalFeedItems = featured ? feedItems.length + 1 : feedItems.length;
+
+  const featuredFeedItem = featured
+    ? `<article class="feed-item">
+          <div class="feed-index">01</div>
+          <div class="feed-body">
+            <div class="feed-section-pill">${escapeHtml(featured.category || "Noticia principal")}</div>
+            <h3 class="feed-headline"><a href="${ctaHref}"${ctaAttrs}>${escapeHtml(featured.headline)}</a></h3>
+            ${featured.body ? `<p class="feed-excerpt">${escapeHtml(featured.body)}</p>` : ""}
+            <div class="feed-meta">
+              <a href="${ctaHref}" class="feed-readmore"${ctaAttrs}>Leer →</a>
+            </div>
+          </div>
+        </article>`
+    : "";
+
+  const feedHtml = totalFeedItems > 0
     ? `<section class="feed-layout" id="feedLayout" hidden>
       <div class="feed-header">
-        <div class="feed-eyebrow">FEED · ${feedItems.length} HISTORIAS</div>
+        <div class="feed-eyebrow">FEED · ${totalFeedItems} HISTORIAS</div>
         <h2 class="feed-title">Todas las historias</h2>
       </div>
       <div class="feed-list">
+        ${featuredFeedItem}
         ${feedItems.map((item, i) => `<article class="feed-item">
-          <div class="feed-index">${String(i + 1).padStart(2, "0")}</div>
+          <div class="feed-index">${String(i + 2).padStart(2, "0")}</div>
           <div class="feed-body">
             <div class="feed-section-pill">${escapeHtml(item.section)}</div>
             <h3 class="feed-headline"><a href="${escapeHtml(item.href)}"${item.href.startsWith("http") ? ` target="_blank" rel="noopener noreferrer"` : ""}>${escapeHtml(item.headline)}</a></h3>
@@ -332,18 +342,6 @@ export function buildPage(
         <a href="/" class="nav-link${inicioActive}">Hoy</a>
         <a href="/ediciones" class="nav-link${archivoActive}">Archivo</a>
       </div>
-      <div class="nav-actions">
-        <button id="cmdTrigger" class="pill-btn cmd-trigger" aria-label="Buscar ediciones (⌘K)">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" class="cmd-search-icon"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.35-4.35"/></svg>
-          <span class="cmd-trigger-label">Buscar</span>
-          <span class="kbd cmd-trigger-kbd">⌘K</span>
-        </button>
-        <button id="themeToggle" class="round-btn theme-btn" aria-label="Cambiar tema">
-          <svg class="icon-auto" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8M12 17v4"/></svg>
-          <svg class="icon-sun" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41"/></svg>
-          <svg class="icon-moon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M21 12.79A9 9 0 1111.21 3 7 7 0 0021 12.79z"/></svg>
-        </button>
-      </div>
       <button class="hamburger" id="hamburgerBtn" aria-label="Menú">
         <span></span><span></span><span></span>
       </button>
@@ -355,6 +353,18 @@ export function buildPage(
       <div class="seg-meta">
         <span class="live-dot"></span>
         <span>${editionMeta}</span>
+      </div>
+      <div class="nav-actions">
+        <button id="cmdTrigger" class="pill-btn cmd-trigger" aria-label="Buscar ediciones (⌘K)">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" class="cmd-search-icon"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.35-4.35"/></svg>
+          <span class="cmd-trigger-label">Buscar</span>
+          <span class="kbd cmd-trigger-kbd">⌘K</span>
+        </button>
+        <button id="themeToggle" class="round-btn theme-btn" aria-label="Cambiar tema">
+          <svg class="icon-auto" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8M12 17v4"/></svg>
+          <svg class="icon-sun" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41"/></svg>
+          <svg class="icon-moon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M21 12.79A9 9 0 1111.21 3 7 7 0 0021 12.79z"/></svg>
+        </button>
       </div>
     </div>
     <div class="mobile-menu" id="mobileMenu">

@@ -449,6 +449,7 @@ document.addEventListener("DOMContentLoaded", () => {
   const contentLayout = document.querySelector(".content-layout");
   const feedLayout = document.getElementById("feedLayout");
   const statsEl = document.querySelector(".stats");
+  const heroEl = document.querySelector(".hero");
 
   segViewTabs.forEach((tab) => {
     tab.addEventListener("click", () => {
@@ -456,16 +457,18 @@ document.addEventListener("DOMContentLoaded", () => {
       segViewTabs.forEach((t) => t.classList.toggle("active", t === tab));
 
       if (view === "feed") {
+        heroEl?.classList.add("view-hidden");
         contentLayout?.classList.add("view-hidden");
         statsEl?.classList.add("view-hidden");
         feedLayout?.removeAttribute("hidden");
+        window.scrollTo({ top: 0, behavior: "smooth" });
       } else {
+        heroEl?.classList.remove("view-hidden");
         contentLayout?.classList.remove("view-hidden");
         statsEl?.classList.remove("view-hidden");
         feedLayout?.setAttribute("hidden", "");
+        window.scrollTo({ top: 0, behavior: "smooth" });
       }
-      // Scroll to top of content
-      window.scrollTo({ top: document.querySelector(".hero")?.offsetTop ?? 0, behavior: "smooth" });
     });
   });
 
