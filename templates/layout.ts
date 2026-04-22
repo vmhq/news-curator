@@ -413,7 +413,7 @@ export function buildPage(
       </div>
     </div>
     <div class="footer-bot">
-      <span class="footer-copy">Hermes Agent · ${new Date().getFullYear()}</span>
+      <span class="footer-copy">vmhq · ${new Date().getFullYear()}</span>
       <span>${date ? `Edición ${escapeHtml(formatDateShort(date))}` : "Daily Brief"}</span>
     </div>
   </footer>
