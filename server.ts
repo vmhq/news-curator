@@ -11,10 +11,10 @@ import {
   getCurationFiles,
   getCachedSummary,
   readCuration,
-  getSummary,
   extractFeatured,
   extractOgImage,
-  isBlockedUrl,
+  isBlockedResolvedUrl,
+  isCurationFileId,
   allEditionsSidebar,
   findTodayCuration,
   dateFromFileId,
@@ -24,6 +24,7 @@ import {
   invalidateFilesCache,
   invalidateSummaryCache,
   renderCurationContent,
+  searchCurations,
   validateCurationContent,
 } from "./lib/curations.ts";
 import { buildPage, escapeHtml } from "./templates/layout.ts";
@@ -349,11 +350,11 @@ async function validateImageUrl(url: string): Promise<string | null> {
     }
     return null;
   }
-  if (isBlockedUrl(url)) return "image_url points to a blocked or internal address";
+  if (await isBlockedResolvedUrl(url)) return "image_url points to a blocked or internal address";
   try {
     const controller = new AbortController();
-    setTimeout(() => controller.abort(), 3000);
-    const resp = await fetch(url, { method: "HEAD", signal: controller.signal, redirect: "error" });
+    const timeout = setTimeout(() => controller.abort(), 3000);
+    const resp = await fetch(url, { method: "HEAD", signal: controller.signal, redirect: "error" }).finally(() => clearTimeout(timeout));
     if (!resp.ok) return `image_url responded with HTTP ${resp.status}`;
     const ct = resp.headers.get("content-type") ?? "";
     if (!ct.startsWith("image/")) return `image_url is not an image (Content-Type: ${ct || "unknown"})`;
@@ -416,7 +417,7 @@ app.use("/api/curations/:date/versions/*", async (c, next) => {
 
 app.get("/api/curations/:date/versions", async (c) => {
   const date = c.req.param("date");
-  if (!/^\d{4}-\d{2}-\d{2}(_\d{2}-\d{2})?$/.test(date)) {
+  if (!isCurationFileId(date)) {
     return c.json({ error: "Invalid edition ID format" }, 400);
   }
   const versionDir = join(VERSIONS_DIR, date);
@@ -436,7 +437,7 @@ app.get("/api/curations/:date/versions", async (c) => {
 app.get("/api/curations/:date/versions/:version", async (c) => {
   const date = c.req.param("date");
   const version = c.req.param("version");
-  if (!/^\d{4}-\d{2}-\d{2}(_\d{2}-\d{2})?$/.test(date)) {
+  if (!isCurationFileId(date)) {
     return c.json({ error: "Invalid edition ID format" }, 400);
   }
   if (!/^[\dTZ-]+-[a-z0-9_-]+$/i.test(version)) {
@@ -450,7 +451,7 @@ app.get("/api/curations/:date/versions/:version", async (c) => {
 
 app.get("/api/curations/:date", async (c) => {
   const date = c.req.param("date");
-  if (!/^\d{4}-\d{2}-\d{2}(_\d{2}-\d{2})?$/.test(date)) {
+  if (!isCurationFileId(date)) {
     return c.json({ error: "Invalid edition ID format" }, 400);
   }
   const filePath = join(CURATIONS_DIR, `${date}.md`);
@@ -463,7 +464,7 @@ app.get("/api/curations/:date", async (c) => {
 
 app.put("/api/curations/:date", async (c) => {
   const date = c.req.param("date");
-  if (!/^\d{4}-\d{2}-\d{2}(_\d{2}-\d{2})?$/.test(date)) {
+  if (!isCurationFileId(date)) {
     return c.json({ error: "Invalid edition ID format" }, 400);
   }
 
@@ -509,7 +510,7 @@ app.use("/api/curations/:date/meta", async (c, next) => {
 
 app.patch("/api/curations/:date/meta", async (c) => {
   const date = c.req.param("date");
-  if (!/^\d{4}-\d{2}-\d{2}(_\d{2}-\d{2})?$/.test(date)) {
+  if (!isCurationFileId(date)) {
     return c.json({ error: "Invalid edition ID format" }, 400);
   }
 
@@ -629,7 +630,7 @@ app.get("/", async (c) => {
 
 app.get("/curacion/:date", async (c) => {
   const date = c.req.param("date");
-  if (!/^\d{4}-\d{2}-\d{2}(_\d{2}-\d{2})?$/.test(date)) {
+  if (!isCurationFileId(date)) {
     return c.text("Fecha inválida", 400);
   }
 
@@ -696,7 +697,7 @@ app.get("/ediciones", async (c) => {
     ? allCurations
         .map(
           (cur) => `
-    <a href="/curacion/${cur.date}" class="edition-card">
+    <a href="/curacion/${escapeHtml(cur.date)}" class="edition-card">
       <div class="edition-meta">
         <span class="edition-date">${escapeHtml(formatDateEs(cur.date))}</span>
         <h3 class="edition-title">${escapeHtml(cur.summary)}</h3>
@@ -724,7 +725,7 @@ app.get("/api/curations", async (c) => {
   // Cursor-based pagination: ?before=YYYY-MM-DD[_HH-MM] (exclusive)
   const before = c.req.query("before");
   if (before) {
-    if (!/^\d{4}-\d{2}-\d{2}(_\d{2}-\d{2})?$/.test(before)) {
+    if (!isCurationFileId(before)) {
       return c.json({ error: "Invalid 'before' cursor format (expected YYYY-MM-DD or YYYY-MM-DD_HH-MM)" }, 400);
     }
     const subset = files.filter((f) => f < before).slice(0, limit);
@@ -791,29 +792,12 @@ app.get("/api/search", async (c) => {
   }
   const query = c.req.query("q")?.slice(0, 200).toLowerCase();
   if (!query || query.length < 2) return c.json({ results: [] });
-  const files = await getCurationFiles();
   const safeQuery = query.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  const settled = await Promise.allSettled(
-    files.map(async (date) => {
-      const fc = await readFile(join(CURATIONS_DIR, `${date}.md`), "utf-8");
-      const lower = fc.toLowerCase();
-      const idx = lower.indexOf(query);
-      if (idx === -1) return null;
-      const start = Math.max(0, idx - 60);
-      const end = Math.min(fc.length, idx + query.length + 60);
-      let snippet = fc.slice(start, end).replace(/\n/g, " ").trim();
-      if (start > 0) snippet = "..." + snippet;
-      if (end < fc.length) snippet += "...";
-      snippet = escapeHtml(snippet);
-      const highlighted = snippet.replace(new RegExp(`(${safeQuery})`, "gi"), "<mark>$1</mark>");
-      const summary = getSummary(fc);
-      return { date, snippet: highlighted, summary };
-    })
-  );
-  const results = settled
-    .filter((r): r is PromiseFulfilledResult<{ date: string; snippet: string; summary: string } | null> => r.status === "fulfilled")
-    .map((r) => r.value)
-    .filter(Boolean);
+  const results = (await searchCurations(query, 20)).map((r) => {
+    const snippet = escapeHtml(r.snippet);
+    const highlighted = snippet.replace(new RegExp(`(${safeQuery})`, "gi"), "<mark>$1</mark>");
+    return { date: r.date, snippet: highlighted, summary: r.summary };
+  });
   return c.json({ results, query });
 });
 

@@ -1,6 +1,7 @@
 import { readdir, readFile } from "fs/promises";
 import { existsSync, watch } from "fs";
 import { join } from "path";
+import { lookup } from "node:dns/promises";
 import { marked, Renderer } from "marked";
 
 export const CURATIONS_DIR =
@@ -37,11 +38,13 @@ marked.use({ renderer });
 
 // ── In-memory caches ──────────────────────────────────────────────────────────
 let filesCache: string[] | null = null;
+let searchIndexCache: Array<{ date: string; content: string; lower: string; summary: string }> | null = null;
 const summaryCache = new Map<string, string>();
 const ogImageCache = new Map<string, string | null>();
 
 export function invalidateFilesCache() {
   filesCache = null;
+  searchIndexCache = null;
 }
 
 export function invalidateSummaryCache(date: string) {
@@ -52,6 +55,7 @@ export function startDirWatcher() {
   if (!existsSync(CURATIONS_DIR)) return;
   watch(CURATIONS_DIR, (_event: string, filename: string | null) => {
     filesCache = null;
+    searchIndexCache = null;
     if (filename) {
       summaryCache.delete(filename.replace(/\.md$/, ""));
     } else {
@@ -60,12 +64,19 @@ export function startDirWatcher() {
   });
 }
 
+export const CURATION_FILE_ID_RE = /^\d{4}-\d{2}-\d{2}(_\d{2}-\d{2})?$/;
+const CURATION_FILENAME_RE = /^\d{4}-\d{2}-\d{2}(_\d{2}-\d{2})?\.md$/;
+
+export function isCurationFileId(id: string): boolean {
+  return CURATION_FILE_ID_RE.test(id);
+}
+
 export async function getCurationFiles(): Promise<string[]> {
   if (filesCache) return filesCache;
   try {
     const files = await readdir(CURATIONS_DIR);
     const sorted = files
-      .filter((f: string) => f.endsWith(".md"))
+      .filter((f: string) => CURATION_FILENAME_RE.test(f))
       .map((f: string) => f.replace(".md", ""))
       .sort()
       .reverse();
@@ -74,6 +85,46 @@ export async function getCurationFiles(): Promise<string[]> {
   } catch {
     return [];
   }
+}
+
+async function getSearchIndex(): Promise<Array<{ date: string; content: string; lower: string; summary: string }>> {
+  if (searchIndexCache) return searchIndexCache;
+  const files = await getCurationFiles();
+  const index: Array<{ date: string; content: string; lower: string; summary: string }> = [];
+  for (const date of files) {
+    try {
+      const content = await readFile(join(CURATIONS_DIR, `${date}.md`), "utf-8");
+      index.push({ date, content, lower: content.toLowerCase(), summary: getSummary(content) });
+    } catch {
+      // Ignore files that disappear between directory read and index build.
+    }
+  }
+  searchIndexCache = index;
+  return searchIndexCache;
+}
+
+export async function searchCurations(
+  query: string,
+  limit = 20
+): Promise<Array<{ date: string; snippet: string; summary: string }>> {
+  const normalized = query.slice(0, 200).toLowerCase();
+  if (normalized.length < 2) return [];
+  const index = await getSearchIndex();
+  const results: Array<{ date: string; snippet: string; summary: string }> = [];
+
+  for (const entry of index) {
+    const idx = entry.lower.indexOf(normalized);
+    if (idx === -1) continue;
+    const start = Math.max(0, idx - 60);
+    const end = Math.min(entry.content.length, idx + normalized.length + 60);
+    let snippet = entry.content.slice(start, end).replace(/\n/g, " ").trim();
+    if (start > 0) snippet = "..." + snippet;
+    if (end < entry.content.length) snippet += "...";
+    results.push({ date: entry.date, snippet, summary: entry.summary });
+    if (results.length >= limit) break;
+  }
+
+  return results;
 }
 
 export function getSummary(content: string): string {
@@ -288,27 +339,36 @@ export function isBlockedUrl(url: string): boolean {
     const parsed = new URL(url);
     const h = parsed.hostname.toLowerCase().replace(/^\[|\]$/g, ""); // strip IPv6 brackets
     if (parsed.protocol !== "http:" && parsed.protocol !== "https:") return true;
-    // IPv4 private/loopback
-    if (h === "localhost" || h === "127.0.0.1" || h === "0.0.0.0") return true;
-    if (h.startsWith("10.") || h.startsWith("192.168.")) return true;
-    if (/^172\.(1[6-9]|2\d|3[01])\./.test(h)) return true;
-    if (h === "169.254.169.254") return true;
-    // All link-local IPv4
-    if (h.startsWith("169.254.")) return true;
-    // IPv6 loopback and special ranges
-    if (h === "::1" || h === "::") return true;
-    // IPv4-mapped IPv6 (::ffff:127.x.x.x, ::ffff:10.x.x.x, etc.)
-    if (h.startsWith("::ffff:")) return true;
-    // Unique local (fc00::/7 — covers fc and fd prefixes)
-    if (/^f[cd]/i.test(h)) return true;
-    // Link-local IPv6 (fe80::/10)
-    if (/^fe[89ab]/i.test(h)) return true;
-    // DNS-based bypasses
-    if (h.endsWith(".internal") || h.endsWith(".local") || h.endsWith(".localhost")) return true;
-    return false;
+    return isBlockedHost(h);
   } catch {
     return true;
   }
+}
+
+export async function isBlockedResolvedUrl(url: string): Promise<boolean> {
+  if (isBlockedUrl(url)) return true;
+  try {
+    const parsed = new URL(url);
+    const addresses = await lookup(parsed.hostname, { all: true, verbatim: true });
+    if (addresses.length === 0) return true;
+    return addresses.some((addr) => isBlockedHost(addr.address));
+  } catch {
+    return true;
+  }
+}
+
+function isBlockedHost(host: string): boolean {
+  const h = host.toLowerCase().replace(/^\[|\]$/g, "");
+  if (h === "localhost" || h === "127.0.0.1" || h === "0.0.0.0") return true;
+  if (h.startsWith("10.") || h.startsWith("192.168.")) return true;
+  if (/^172\.(1[6-9]|2\d|3[01])\./.test(h)) return true;
+  if (h.startsWith("169.254.")) return true;
+  if (h === "::1" || h === "::") return true;
+  if (h.startsWith("::ffff:")) return true;
+  if (/^f[cd]/i.test(h)) return true;
+  if (/^fe[89ab]/i.test(h)) return true;
+  if (h.endsWith(".internal") || h.endsWith(".local") || h.endsWith(".localhost")) return true;
+  return false;
 }
 
 const MAX_OG_CACHE = 500;
@@ -316,7 +376,7 @@ const MAX_SUMMARY_CACHE = 1000;
 
 export async function extractOgImage(url: string): Promise<string | null> {
   if (ogImageCache.has(url)) return ogImageCache.get(url)!;
-  if (isBlockedUrl(url)) return null;
+  if (await isBlockedResolvedUrl(url)) return null;
   let result: string | null = null;
   try {
     const controller = new AbortController();
@@ -325,8 +385,7 @@ export async function extractOgImage(url: string): Promise<string | null> {
       signal: controller.signal,
       redirect: "error",
       headers: { "User-Agent": "Mozilla/5.0 (compatible; DailyBrief/1.0)" },
-    });
-    clearTimeout(timeout);
+    }).finally(() => clearTimeout(timeout));
     const reader = resp.body?.getReader();
     let html = "";
     if (reader) {

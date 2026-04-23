@@ -1,6 +1,9 @@
 import { describe, expect, test } from "bun:test";
 import {
   extractFeatured,
+  isBlockedResolvedUrl,
+  isBlockedUrl,
+  isCurationFileId,
   renderCurationContent,
   validateCurationContent,
 } from "../lib/curations.ts";
@@ -78,5 +81,25 @@ describe("curation rendering", () => {
 
     expect(featured?.headline).toBe("OpenAI presenta una mejora importante para agentes");
     expect(featured?.firstUrl).toBe("https://example.com/openai-agents");
+  });
+});
+
+describe("security helpers", () => {
+  test("accepts only expected curation file IDs", () => {
+    expect(isCurationFileId("2026-04-23")).toBe(true);
+    expect(isCurationFileId("2026-04-23_09-30")).toBe(true);
+    expect(isCurationFileId("../2026-04-23")).toBe(false);
+    expect(isCurationFileId("2026-04-23\"><script>")).toBe(false);
+  });
+
+  test("blocks local and private literal URLs before fetch", () => {
+    expect(isBlockedUrl("http://127.0.0.1:8391")).toBe(true);
+    expect(isBlockedUrl("http://10.0.0.5/image.png")).toBe(true);
+    expect(isBlockedUrl("file:///etc/passwd")).toBe(true);
+    expect(isBlockedUrl("https://example.com/image.png")).toBe(false);
+  });
+
+  test("blocks hostnames that resolve to loopback addresses", async () => {
+    expect(await isBlockedResolvedUrl("http://localhost:8391/health")).toBe(true);
   });
 });
