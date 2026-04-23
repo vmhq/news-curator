@@ -6,6 +6,7 @@ on:
 
 env:
   IMAGE: ghcr.io/vmhq/news-curator
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
 jobs:
   build:
