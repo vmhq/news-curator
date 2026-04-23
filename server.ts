@@ -1,9 +1,9 @@
-import { Hono } from "hono";
+import { Hono, type Context, type Next } from "hono";
 import { serveStatic } from "hono/bun";
-import { readFile, writeFile, mkdir } from "fs/promises";
+import { readFile, writeFile, mkdir, readdir } from "fs/promises";
 import { existsSync } from "fs";
 import { join, basename } from "path";
-import { timingSafeEqual } from "node:crypto";
+import { randomUUID, timingSafeEqual } from "node:crypto";
 import {
   CURATIONS_DIR,
   SITE_URL,
@@ -23,6 +23,8 @@ import {
   estimateReadingTime,
   invalidateFilesCache,
   invalidateSummaryCache,
+  renderCurationContent,
+  validateCurationContent,
 } from "./lib/curations.ts";
 import { buildPage, escapeHtml } from "./templates/layout.ts";
 
@@ -87,6 +89,8 @@ function isValidApiKey(provided: string): boolean {
 // Default: public/uploads (works for local dev).
 // In Docker: set UPLOADS_DIR=/data/uploads and mount it as a named volume.
 const UPLOADS_DIR = process.env.UPLOADS_DIR ?? join("public", "uploads");
+const DRAFTS_DIR = process.env.DRAFTS_DIR ?? join(CURATIONS_DIR, ".drafts");
+const VERSIONS_DIR = process.env.VERSIONS_DIR ?? join(CURATIONS_DIR, ".versions");
 const MAX_IMAGE_SIZE = 10 * 1024 * 1024; // 10 MB
 const ALLOWED_IMAGE_TYPES = new Set(["image/jpeg", "image/png", "image/webp", "image/gif", "image/avif"]);
 const IMAGE_EXT: Record<string, string> = {
@@ -94,13 +98,55 @@ const IMAGE_EXT: Record<string, string> = {
   "image/gif": "gif", "image/avif": "avif",
 };
 
-app.use("/api/images", async (c, next) => {
-  if (!API_KEY) return c.json({ error: "Upload endpoint disabled: API_KEY not configured" }, 503);
+function logEvent(event: string, details: Record<string, unknown> = {}) {
+  console.info(JSON.stringify({ level: "info", event, ts: new Date().toISOString(), ...details }));
+}
+
+async function requireApiKey(c: Context, next: Next, disabledMessage: string) {
+  if (!API_KEY) return c.json({ error: disabledMessage }, 503);
   const key =
     c.req.header("X-Api-Key") ??
     c.req.header("Authorization")?.replace(/^Bearer\s+/i, "");
   if (!key || !isValidApiKey(key)) return c.json({ error: "Unauthorized" }, 401);
   await next();
+}
+
+async function readRequestContent(c: Context): Promise<string | Response> {
+  const ct = c.req.header("Content-Type") ?? "";
+  if (ct.includes("application/json")) {
+    const body = await c.req.json();
+    if (typeof body.content !== "string") {
+      return c.json({ error: "Missing 'content' field" }, 400);
+    }
+    return body.content;
+  }
+  return c.req.text();
+}
+
+function editionIdFromNow(): string {
+  const now = new Date();
+  const date = now.toLocaleDateString("sv-SE", { timeZone: "America/Santiago" });
+  const time = now
+    .toLocaleTimeString("sv-SE", { timeZone: "America/Santiago", hour: "2-digit", minute: "2-digit" })
+    .replace(":", "-");
+  return `${date}_${time}`;
+}
+
+function versionTimestamp(): string {
+  return new Date().toISOString().replace(/[:.]/g, "-");
+}
+
+async function saveVersionSnapshot(date: string, content: string, reason: string) {
+  const safeReason = reason.replace(/[^a-z0-9_-]/gi, "").slice(0, 32) || "edit";
+  const dir = join(VERSIONS_DIR, date);
+  await mkdir(dir, { recursive: true });
+  const filename = `${versionTimestamp()}-${safeReason}.md`;
+  await writeFile(join(dir, filename), content, "utf-8");
+  logEvent("curation.version_saved", { edition: date, version: filename, reason: safeReason });
+}
+
+app.use("/api/images", async (c, next) => {
+  return requireApiKey(c, next, "Upload endpoint disabled: API_KEY not configured");
 });
 
 app.post("/api/images", async (c) => {
@@ -136,37 +182,41 @@ app.post("/api/images", async (c) => {
 // ─────────────────────────────────────────────────────────────────────────────
 
 app.use("/api/publish", async (c, next) => {
-  if (!API_KEY) return c.json({ error: "Publish endpoint disabled: API_KEY not configured" }, 503);
-  const key =
-    c.req.header("X-Api-Key") ??
-    c.req.header("Authorization")?.replace(/^Bearer\s+/i, "");
-  if (!key || !isValidApiKey(key)) return c.json({ error: "Unauthorized" }, 401);
-  await next();
+  return requireApiKey(c, next, "Publish endpoint disabled: API_KEY not configured");
 });
 
 app.post("/api/publish", async (c) => {
-  let content: string;
+  let contentOrResponse: string | Response;
   const ct = c.req.header("Content-Type") ?? "";
   if (ct.includes("application/json")) {
     const body = await c.req.json();
-    if (typeof body.content !== "string") return c.json({ error: "Missing 'content' field" }, 400);
-    content = body.content;
+    if (typeof body.draft_id === "string") {
+      const draftId = body.draft_id;
+      if (!/^[a-f0-9-]{36}$/i.test(draftId)) return c.json({ error: "Invalid draft_id" }, 400);
+      const draftPath = join(DRAFTS_DIR, `${draftId}.md`);
+      if (!existsSync(draftPath)) return c.json({ error: "Draft not found" }, 404);
+      contentOrResponse = await readFile(draftPath, "utf-8");
+    } else if (typeof body.content === "string") {
+      contentOrResponse = body.content;
+    } else {
+      return c.json({ error: "Missing 'content' or 'draft_id' field" }, 400);
+    }
   } else {
-    content = await c.req.text();
+    contentOrResponse = await c.req.text();
   }
+  if (contentOrResponse instanceof Response) return contentOrResponse;
+  const content = contentOrResponse;
 
   if (content.length < 10 || content.length > 1_000_000) {
     return c.json({ error: "Content length out of range (10–1_000_000 chars)" }, 400);
   }
+  const validation = validateCurationContent(content);
+  if (!validation.valid) {
+    logEvent("curation.publish_rejected", { errors: validation.errors.length, warnings: validation.warnings.length });
+    return c.json({ error: "Validation failed", validation }, 422);
+  }
 
-  // Generate edition ID from current time in Santiago TZ
-  const now = new Date();
-  const tz = "America/Santiago";
-  const date = now.toLocaleDateString("sv-SE", { timeZone: tz });
-  const time = now
-    .toLocaleTimeString("sv-SE", { timeZone: tz, hour: "2-digit", minute: "2-digit" })
-    .replace(":", "-");
-  const editionId = `${date}_${time}`;
+  const editionId = editionIdFromNow();
   const filePath = join(CURATIONS_DIR, `${editionId}.md`);
 
   await mkdir(CURATIONS_DIR, { recursive: true });
@@ -174,9 +224,112 @@ app.post("/api/publish", async (c) => {
   invalidateFilesCache();
 
   const warning = await checkImageUrl(content);
-  const resp: Record<string, unknown> = { success: true, edition: editionId, url: `/curacion/${editionId}` };
+  logEvent("curation.published", { edition: editionId, warnings: validation.warnings.length });
+  const resp: Record<string, unknown> = { success: true, edition: editionId, url: `/curacion/${editionId}`, validation };
   if (warning) resp.warning = warning;
   return c.json(resp, 201);
+});
+
+// ── Agent validation + draft workflow ────────────────────────────────────────
+
+app.use("/api/validate", async (c, next) => {
+  return requireApiKey(c, next, "Validate endpoint disabled: API_KEY not configured");
+});
+
+app.post("/api/validate", async (c) => {
+  const contentOrResponse = await readRequestContent(c);
+  if (contentOrResponse instanceof Response) return contentOrResponse;
+  const validation = validateCurationContent(contentOrResponse);
+  logEvent("curation.validated", { valid: validation.valid, errors: validation.errors.length, warnings: validation.warnings.length });
+  return c.json({ valid: validation.valid, validation }, validation.valid ? 200 : 422);
+});
+
+app.use("/api/drafts", async (c, next) => {
+  return requireApiKey(c, next, "Draft endpoint disabled: API_KEY not configured");
+});
+app.use("/api/drafts/*", async (c, next) => {
+  return requireApiKey(c, next, "Draft endpoint disabled: API_KEY not configured");
+});
+
+app.post("/api/drafts", async (c) => {
+  const contentOrResponse = await readRequestContent(c);
+  if (contentOrResponse instanceof Response) return contentOrResponse;
+  const content = contentOrResponse;
+  const validation = validateCurationContent(content);
+  if (!validation.valid) {
+    logEvent("draft.rejected", { errors: validation.errors.length, warnings: validation.warnings.length });
+    return c.json({ error: "Validation failed", validation }, 422);
+  }
+
+  const draftId = randomUUID();
+  await mkdir(DRAFTS_DIR, { recursive: true });
+  await writeFile(join(DRAFTS_DIR, `${draftId}.md`), content, "utf-8");
+  logEvent("draft.created", { draft: draftId, warnings: validation.warnings.length });
+
+  return c.json({
+    success: true,
+    draft: draftId,
+    previewUrl: `/drafts/${draftId}`,
+    publish: { method: "POST", path: "/api/publish", body: { draft_id: draftId } },
+    validation,
+  }, 201);
+});
+
+app.get("/api/drafts/:id", async (c) => {
+  const draftId = c.req.param("id");
+  if (!/^[a-f0-9-]{36}$/i.test(draftId)) return c.json({ error: "Invalid draft ID" }, 400);
+  const draftPath = join(DRAFTS_DIR, `${draftId}.md`);
+  if (!existsSync(draftPath)) return c.json({ error: "Draft not found" }, 404);
+  const content = await readFile(draftPath, "utf-8");
+  return c.json({ draft: draftId, content, validation: validateCurationContent(content) });
+});
+
+app.post("/api/drafts/:id/publish", async (c) => {
+  const draftId = c.req.param("id");
+  if (!/^[a-f0-9-]{36}$/i.test(draftId)) return c.json({ error: "Invalid draft ID" }, 400);
+  const draftPath = join(DRAFTS_DIR, `${draftId}.md`);
+  if (!existsSync(draftPath)) return c.json({ error: "Draft not found" }, 404);
+
+  const content = await readFile(draftPath, "utf-8");
+  const validation = validateCurationContent(content);
+  if (!validation.valid) return c.json({ error: "Validation failed", validation }, 422);
+
+  const editionId = editionIdFromNow();
+  await mkdir(CURATIONS_DIR, { recursive: true });
+  await writeFile(join(CURATIONS_DIR, `${editionId}.md`), content, "utf-8");
+  invalidateFilesCache();
+  logEvent("draft.published", { draft: draftId, edition: editionId, warnings: validation.warnings.length });
+
+  const warning = await checkImageUrl(content);
+  const resp: Record<string, unknown> = { success: true, draft: draftId, edition: editionId, url: `/curacion/${editionId}`, validation };
+  if (warning) resp.warning = warning;
+  return c.json(resp, 201);
+});
+
+app.get("/drafts/:id", async (c) => {
+  const draftId = c.req.param("id");
+  if (!/^[a-f0-9-]{36}$/i.test(draftId)) return c.text("Draft inválido", 400);
+  const draftPath = join(DRAFTS_DIR, `${draftId}.md`);
+  if (!existsSync(draftPath)) return c.text("Draft no encontrado", 404);
+
+  const content = await readFile(draftPath, "utf-8");
+  const rendered = await renderCurationContent(content);
+  const featured = extractFeatured(content);
+  const readingTime = estimateReadingTime(content);
+  const validation = validateCurationContent(content);
+  const validationHtml = validation.warnings.length
+    ? `<div class="empty-state"><h2>Preview de draft</h2><p>${validation.warnings.length} advertencia(s). Publicable: ${validation.valid ? "sí" : "no"}.</p></div>`
+    : `<div class="empty-state"><h2>Preview de draft</h2><p>Validación correcta.</p></div>`;
+
+  return c.html(
+    buildPage(`Daily Brief — Draft ${draftId.slice(0, 8)}`, `${validationHtml}${rendered.html}`, {
+      featured,
+      heroImage: rendered.coverImage,
+      canonicalPath: `/drafts/${draftId}`,
+      hideSidebar: true,
+      readingTime,
+    })
+  );
 });
 
 // ── Shared helpers ───────────────────────────────────────────────────────────
@@ -213,7 +366,7 @@ async function validateImageUrl(url: string): Promise<string | null> {
 /** Extract and validate image_url from markdown frontmatter; returns warning or null. */
 async function checkImageUrl(content: string): Promise<string | null> {
   const m = content.match(/^---\n[\s\S]*?image_url:\s*["']?([^"'\n]+)["']?[\s\S]*?\n---/);
-  if (!m) return null;
+  if (!m?.[1]) return null;
   return validateImageUrl(m[1].trim());
 }
 
@@ -222,14 +375,16 @@ function parseFrontmatter(content: string): { meta: Record<string, string>; body
   const m = content.match(/^---\n([\s\S]*?)\n---\n([\s\S]*)$/);
   if (!m) return { meta: {}, body: content };
   const meta: Record<string, string> = {};
-  for (const line of m[1].split("\n")) {
+  const rawMeta = m[1] ?? "";
+  const rawBody = m[2] ?? "";
+  for (const line of rawMeta.split("\n")) {
     const ci = line.indexOf(":");
     if (ci === -1) continue;
     const key = line.slice(0, ci).trim();
     const val = line.slice(ci + 1).trim().replace(/^["']|["']$/g, "");
     if (key) meta[key] = val;
   }
-  return { meta, body: m[2] };
+  return { meta, body: rawBody };
 }
 
 function serializeFrontmatter(meta: Record<string, string>, body: string): string {
@@ -249,12 +404,48 @@ function serializeFrontmatter(meta: Record<string, string>, body: string): strin
 app.use("/api/curations/:date", async (c, next) => {
   // Only guard write methods; GET is public
   if (c.req.method === "GET") return next();
-  if (!API_KEY) return c.json({ error: "Edit endpoint disabled: API_KEY not configured" }, 503);
-  const key =
-    c.req.header("X-Api-Key") ??
-    c.req.header("Authorization")?.replace(/^Bearer\s+/i, "");
-  if (!key || !isValidApiKey(key)) return c.json({ error: "Unauthorized" }, 401);
-  await next();
+  return requireApiKey(c, next, "Edit endpoint disabled: API_KEY not configured");
+});
+
+app.use("/api/curations/:date/versions", async (c, next) => {
+  return requireApiKey(c, next, "Versions endpoint disabled: API_KEY not configured");
+});
+app.use("/api/curations/:date/versions/*", async (c, next) => {
+  return requireApiKey(c, next, "Versions endpoint disabled: API_KEY not configured");
+});
+
+app.get("/api/curations/:date/versions", async (c) => {
+  const date = c.req.param("date");
+  if (!/^\d{4}-\d{2}-\d{2}(_\d{2}-\d{2})?$/.test(date)) {
+    return c.json({ error: "Invalid edition ID format" }, 400);
+  }
+  const versionDir = join(VERSIONS_DIR, date);
+  if (!existsSync(versionDir)) return c.json({ edition: date, versions: [] });
+  const versions = (await readdir(versionDir))
+    .filter((file) => file.endsWith(".md"))
+    .sort()
+    .reverse()
+    .map((file) => ({
+      id: file.replace(/\.md$/, ""),
+      file,
+      path: `/api/curations/${date}/versions/${file.replace(/\.md$/, "")}`,
+    }));
+  return c.json({ edition: date, versions });
+});
+
+app.get("/api/curations/:date/versions/:version", async (c) => {
+  const date = c.req.param("date");
+  const version = c.req.param("version");
+  if (!/^\d{4}-\d{2}-\d{2}(_\d{2}-\d{2})?$/.test(date)) {
+    return c.json({ error: "Invalid edition ID format" }, 400);
+  }
+  if (!/^[\dTZ-]+-[a-z0-9_-]+$/i.test(version)) {
+    return c.json({ error: "Invalid version ID format" }, 400);
+  }
+  const filePath = join(VERSIONS_DIR, date, `${version}.md`);
+  if (!existsSync(filePath)) return c.json({ error: "Version not found" }, 404);
+  const content = await readFile(filePath, "utf-8");
+  return c.json({ edition: date, version, content });
 });
 
 app.get("/api/curations/:date", async (c) => {
@@ -294,23 +485,26 @@ app.put("/api/curations/:date", async (c) => {
   if (content.length < 10 || content.length > 1_000_000) {
     return c.json({ error: "Content length out of range (10–1_000_000 chars)" }, 400);
   }
+  const validation = validateCurationContent(content);
+  if (!validation.valid) {
+    logEvent("curation.update_rejected", { edition: date, errors: validation.errors.length, warnings: validation.warnings.length });
+    return c.json({ error: "Validation failed", validation }, 422);
+  }
 
+  const previous = await readFile(filePath, "utf-8");
+  await saveVersionSnapshot(date, previous, "put");
   await writeFile(filePath, content, "utf-8");
   invalidateSummaryCache(date);
 
   const warning = await checkImageUrl(content);
-  const resp: Record<string, unknown> = { success: true, edition: date, url: `/curacion/${date}` };
+  logEvent("curation.updated", { edition: date, warnings: validation.warnings.length });
+  const resp: Record<string, unknown> = { success: true, edition: date, url: `/curacion/${date}`, validation };
   if (warning) resp.warning = warning;
   return c.json(resp);
 });
 
 app.use("/api/curations/:date/meta", async (c, next) => {
-  if (!API_KEY) return c.json({ error: "Edit endpoint disabled: API_KEY not configured" }, 503);
-  const key =
-    c.req.header("X-Api-Key") ??
-    c.req.header("Authorization")?.replace(/^Bearer\s+/i, "");
-  if (!key || !isValidApiKey(key)) return c.json({ error: "Unauthorized" }, 401);
-  await next();
+  return requireApiKey(c, next, "Edit endpoint disabled: API_KEY not configured");
 });
 
 app.patch("/api/curations/:date/meta", async (c) => {
@@ -341,10 +535,12 @@ app.patch("/api/curations/:date/meta", async (c) => {
   }
 
   const updated = serializeFrontmatter(meta, body);
+  await saveVersionSnapshot(date, existing, "meta");
   await writeFile(filePath, updated, "utf-8");
   invalidateSummaryCache(date);
 
   const warning = meta.image_url ? await validateImageUrl(meta.image_url) : null;
+  logEvent("curation.meta_updated", { edition: date, fields: Object.keys(patch).length });
   const resp: Record<string, unknown> = { success: true, edition: date, meta };
   if (warning) resp.warning = warning;
   return c.json(resp);
@@ -363,7 +559,7 @@ app.get("/", async (c) => {
   let isToday = true;
 
   if (!targetDate && files.length > 0) {
-    targetDate = files[0];
+    targetDate = files[0] ?? null;
     isToday = false;
   }
 
@@ -538,7 +734,7 @@ app.get("/api/curations", async (c) => {
     const curations = settled
       .filter((r): r is PromiseFulfilledResult<{ date: string; summary: string }> => r.status === "fulfilled")
       .map((r) => r.value);
-    const nextCursor = curations.length === limit ? curations[curations.length - 1].date : null;
+    const nextCursor = curations.length === limit ? curations.at(-1)?.date ?? null : null;
     return c.json({ curations, nextCursor, total: files.length });
   }
 

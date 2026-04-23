@@ -130,6 +130,8 @@ DAILY_BRIEF_URL=       # URL base del servidor, ej: https://dailyb.vmhq.cl
 | `CURATIONS_DIR` | `/data/curations` | Directorio con los archivos Markdown de ediciones |
 | `SITE_URL` | `http://localhost:8391` | URL pública — usada en canonical y OG tags |
 | `UPLOADS_DIR` | `public/uploads` | Directorio de imágenes subidas vía API. En Docker apunta a `/data/uploads` (volumen persistente) para que las imágenes sobrevivan rebuilds |
+| `DRAFTS_DIR` | `${CURATIONS_DIR}/.drafts` | Directorio para borradores generados por agentes antes de publicar |
+| `VERSIONS_DIR` | `${CURATIONS_DIR}/.versions` | Directorio para snapshots automáticos antes de editar ediciones |
 
 ## Seguridad
 
@@ -151,10 +153,17 @@ DAILY_BRIEF_URL=       # URL base del servidor, ej: https://dailyb.vmhq.cl
 | `GET` | `/api/curations` | JSON paginado (`?page=&limit=` o `?before=&limit=`) |
 | `GET` | `/api/search` | Búsqueda full-text (`?q=`) |
 | `GET` | `/health` | Estado del servidor |
+| `POST` | `/api/validate` | Validar markdown antes de publicar (requiere `X-Api-Key`) |
+| `POST` | `/api/drafts` | Crear borrador validado y obtener URL de preview (requiere `X-Api-Key`) |
+| `GET` | `/api/drafts/:id` | Leer borrador raw + resultado de validación (requiere `X-Api-Key`) |
+| `GET` | `/drafts/:id` | Vista previa HTML del borrador |
+| `POST` | `/api/drafts/:id/publish` | Publicar un borrador validado (requiere `X-Api-Key`) |
 | `POST` | `/api/publish` | Publicar nueva edición (requiere `X-Api-Key`) |
 | `GET` | `/api/curations/:date` | Markdown raw de una edición |
 | `PUT` | `/api/curations/:date` | Reemplazar contenido de edición existente (requiere `X-Api-Key`) |
 | `PATCH` | `/api/curations/:date/meta` | Actualizar solo frontmatter (requiere `X-Api-Key`) |
+| `GET` | `/api/curations/:date/versions` | Listar snapshots de una edición (requiere `X-Api-Key`) |
+| `GET` | `/api/curations/:date/versions/:version` | Leer un snapshot raw (requiere `X-Api-Key`) |
 | `POST` | `/api/images` | Subir imagen propia para usar como portada (requiere `X-Api-Key`) |
 
 Ver [`.claude/commands/curar.md`](./.claude/commands/curar.md) para la referencia completa de la API y el formato del contenido.
@@ -167,6 +176,10 @@ Ver [`.claude/commands/curar.md`](./.claude/commands/curar.md) para la referenci
 - Subida de imágenes propias via `POST /api/images` (jpeg, png, webp, gif, avif — máx 10 MB)
 - Caché en memoria con invalidación automática vía watcher de directorio (`fs.watch`)
 - API de edición: `PUT /api/curations/:date` (reemplazar contenido) y `PATCH /api/curations/:date/meta` (actualizar solo frontmatter)
+- Validación editorial para agentes: estructura requerida, featured story, secciones, historias, links inseguros, duplicados y estadísticas
+- Borradores con preview HTML antes de publicar
+- Snapshots automáticos en cada `PUT`/`PATCH` para recuperar versiones previas
+- Logs estructurados JSON para publicación, validación, drafts y snapshots
 - Paginación cursor-based en `/api/curations` (`?before=&limit=`) además de offset (`?page=&limit=`)
 - Tiempo estimado de lectura por edición
 - TOC flotante móvil con panel bottom-sheet
@@ -174,3 +187,11 @@ Ver [`.claude/commands/curar.md`](./.claude/commands/curar.md) para la referenci
 - Búsqueda full-text con debounce
 - Sidebar paginado (8 ediciones/página)
 - No indexable — `noindex, nofollow` en todas las páginas
+
+## Flujo recomendado para agentes
+
+1. Generar el markdown completo siguiendo la estructura esperada.
+2. Enviar a `POST /api/validate` y corregir si hay `errors`.
+3. Crear un borrador con `POST /api/drafts`.
+4. Revisar `previewUrl` si se requiere supervisión humana.
+5. Publicar con `POST /api/drafts/:id/publish` o `POST /api/publish` usando `{ "draft_id": "..." }`.

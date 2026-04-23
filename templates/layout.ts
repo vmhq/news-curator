@@ -15,7 +15,7 @@ function formatDateShort(fileId: string): string {
   const clean = dateFromFileId(fileId);
   const dt = new Date(clean + "T12:00:00");
   if (Number.isNaN(dt.getTime())) return fileId;
-  return `${dt.getDate()} ${MONTHS_SHORT_ES[dt.getMonth()]} ${dt.getFullYear()}`;
+  return `${dt.getDate()} ${MONTHS_SHORT_ES[dt.getMonth()] ?? ""} ${dt.getFullYear()}`;
 }
 
 /** "Viernes 17 de abril" — no year, used for hero date */
@@ -71,15 +71,15 @@ function buildFeedItems(body: string): Array<{ section: string; headline: string
   for (const chunk of chunks) {
     const h2Match = chunk.match(/^<h2[^>]*>([\s\S]*?)<\/h2>/i);
     const h3Match = chunk.match(/^<h3[^>]*>([\s\S]*?)<\/h3>/i);
-    if (h2Match) {
+    if (h2Match?.[1]) {
       currentSection = h2Match[1].replace(/<[^>]+>/g, "").trim();
-    } else if (h3Match && currentSection) {
+    } else if (h3Match?.[1] && currentSection) {
       const headlineHtml = h3Match[1];
       const headline = headlineHtml.replace(/<[^>]+>/g, "").trim();
       const hrefMatch = headlineHtml.match(/href="([^"]+)"/);
-      const href = hrefMatch ? hrefMatch[1] : "#article-body";
+      const href = hrefMatch?.[1] ?? "#article-body";
       const pMatch = chunk.match(/<\/h3>[\s\S]*?<p[^>]*>([\s\S]*?)<\/p>/i);
-      const excerpt = pMatch ? pMatch[1].replace(/<[^>]+>/g, "").trim() : "";
+      const excerpt = pMatch?.[1] ? pMatch[1].replace(/<[^>]+>/g, "").trim() : "";
       if (headline) items.push({ section: currentSection, headline, excerpt, href });
     }
   }
