@@ -4,146 +4,169 @@
 
 ```bash
 bun install        # Install dependencies
-bun run server.ts  # Start the server (also: bun run dev / bun run start)
-PORT=3000 bun run server.ts  # Custom port (default: 8391)
+bun run dev        # Start the server with hot reload
+bun run start      # Start the server
+bun run server.ts  # Equivalent direct entrypoint
+PORT=3000 bun run start
+bun test           # Run test suite
 ```
 
-Server runs on `http://localhost:8391`. There are no tests or linting configured.
+Server runs on `http://localhost:8391` by default. There is no lint script configured.
 
 ## Architecture
 
-Multi-file server using **Bun** runtime + **Hono** framework. All HTML is server-rendered — no frontend build step or framework.
+Multi-file server using **Bun** runtime + **Hono** framework. All HTML is server-rendered; there is no frontend build step.
 
 | File | Responsibility |
 |------|---------------|
-| `server.ts` | Routes, API endpoints, middleware |
-| `lib/curations.ts` | File I/O, in-memory caches, markdown parsing, date utilities |
-| `templates/layout.ts` | `buildPage()` — full HTML assembly |
+| `server.ts` | Bun entrypoint; exports `{ port, fetch }` |
+| `app.ts` | `createApp()` app assembly, middleware, static files, health/readiness, route registration |
+| `routes/public.ts` | Public HTML pages (`/`, `/curacion/:date`, `/ediciones`, `/drafts/:id`) |
+| `routes/api.ts` | JSON API, authenticated write endpoints, drafts, versions, diff, uploads |
+| `lib/config.ts` | Runtime config loading and rate-limit defaults |
+| `lib/curations.ts` | File I/O, caches, markdown rendering/parsing, search index, validation, OG image helpers |
+| `lib/frontmatter.ts` | Frontmatter parse/serialize and `image_url` validation |
+| `lib/http-cache.ts` | ETag / Last-Modified helpers |
+| `lib/rate-limit.ts` | In-memory per-IP rate limiting |
+| `lib/retention.ts` | Draft cleanup and version retention |
+| `templates/layout.ts` | `buildPage()` and `escapeHtml()` |
 
-**Data source**: Markdown files at the path set by `CURATIONS_DIR` env var (defaults to `/data/curations`). Filenames follow the pattern `YYYY-MM-DD.md` or `YYYY-MM-DD_HH-MM.md` (multiple editions per day). The server reads files at request time — caches in memory, invalidated by a `fs.watch` watcher.
+## Runtime data and configuration
 
-**Constants (in `lib/curations.ts`):**
-- `CURATIONS_DIR` — path to markdown files (env var, default `/data/curations`)
-- `SITE_URL` — env var, default `http://localhost:8391` — used for canonical URLs and OG tags
-- `TZ = "America/Santiago"` — timezone for `todayLocal()`
-- `DEFAULT_COVER = "${SITE_URL}/static/cover.svg"` — fallback hero image
+Markdown editions live under `CURATIONS_DIR` and use IDs like `YYYY-MM-DD` or `YYYY-MM-DD_HH-MM`. The app keeps in-memory caches and invalidates them through a `fs.watch` watcher when enabled.
 
----
+Main runtime settings:
+
+- `PORT` — server port, default `8391`
+- `API_KEY` — enables authenticated routes
+- `CURATIONS_DIR` — markdown edition directory, default `/data/curations`
+- `SITE_URL` — canonical/OG base URL, default `http://localhost:8391`
+- `UPLOADS_DIR` — uploaded image directory, default `public/uploads`
+- `DRAFTS_DIR` — draft directory, default `${CURATIONS_DIR}/.drafts`
+- `VERSIONS_DIR` — version snapshot directory, default `${CURATIONS_DIR}/.versions`
+- `DRAFT_TTL_HOURS` — default `72`
+- `MAX_VERSIONS_PER_EDITION` — default `20`
+
+`app.ts` calls `loadRuntimeConfig()` and `configureCurationsEnv()`, starts or stops the directory watcher, and runs a retention pass on startup.
 
 ## Key functions
 
 ### `lib/curations.ts`
 
-**File handling & caching:**
-- `getCurationFiles()` — reads and sorts all filenames descending (newest first); supports `YYYY-MM-DD_HH-MM` suffixed names; result cached in `filesCache`
-- `invalidateFilesCache()` — clears `filesCache`
-- `invalidateSummaryCache(date)` — evicts one entry from `summaryCache`
-- `startDirWatcher()` — sets up `fs.watch` on `CURATIONS_DIR`; invalidates caches on any file change
-- `getCachedSummary(date)` — reads and caches the summary for an edition; evicts oldest when over `MAX_SUMMARY_CACHE = 1000`
-- `dateFromFileId(id)` — strips time suffix: `"2026-04-07_22-21"` → `"2026-04-07"`
-- `findTodayCuration(files)` — returns the most recent file ID matching today's date (Santiago TZ)
-- `groupByDay(files)` — groups file IDs by their date component (returns Map)
-- `allEditionsSidebar(files)` — returns files as-is (already sorted desc); used for sidebar listing
-- `todayLocal()` — today's date as `YYYY-MM-DD` using `America/Santiago` timezone
+File handling and caches:
 
-**Parsing:**
-- `readCuration(date)` — reads a markdown file; extracts `coverImage` from frontmatter (`image_url:` field), strips frontmatter/H1/timestamp line, normalizes `## 🔥 Featured Story:` heading (strips "Featured Story:" prefix for consistent rendering), returns `{ raw, html, coverImage }`. The featured story block appears in both the hero and the article body.
-- `extractFeatured(content)` — parses the `## 🔥` section; excerpt is the first full paragraph (`split("\n\n")[0]`), truncated at 280 chars on a word boundary with `…`; also extracts `firstUrl`
-- `getSummary(content)` — extracts a short title from the first `### ` or `## ` heading, trimmed at word boundary
-- `formatDateEs(dateStr)` — formats a file ID to Spanish date string; if the ID has a time suffix, appends `(HH:MM)` e.g. `"Miércoles 8 de abril de 2026 (22:21)"`
-- `estimateReadingTime(raw)` — returns estimated reading time in minutes (words / 200, minimum 1)
+- `getCurationFiles()` — reads, validates, sorts, and caches edition IDs descending
+- `searchCurations(query, limit)` — full-text search over a cached in-memory index
+- `invalidateFilesCache()` — clears file/index caches
+- `invalidateSummaryCache(date)` — evicts one summary entry
+- `startDirWatcher()` / `stopDirWatcher()` — manage `fs.watch`
+- `getCacheStats()` — cache and watcher status for `/health`
+- `isCurationFileId(id)` / `CURATION_FILE_ID_RE` — canonical edition ID validation
+- `dateFromFileId(id)` / `todayLocal()` / `findTodayCuration(files)` / `groupByDay(files)` / `allEditionsSidebar(files)` — edition/date utilities
 
-**Image handling:**
-- `isBlockedUrl(url)` — rejects private IPs, loopback, link-local, `.internal`/`.local`/`.localhost` domains, and non-http(s) protocols (SSRF protection)
-- `isGoodOgImage(imgUrl)` — rejects URLs matching `LOGO_PATTERNS` (logos, icons, favicons) or tiny images
-- `extractOgImage(url)` — fetches a URL, scrapes `og:image` or `twitter:image`, validates with `isGoodOgImage()` (5s timeout, reads max 50 KB, best-effort); cached in `ogImageCache` (max 500 entries)
-- Hero image priority: `coverImage` from frontmatter → `extractOgImage()` from featured URL → `DEFAULT_COVER`
+Rendering and parsing:
 
-### `templates/layout.ts`
+- `readCuration(date)` — reads markdown, parses frontmatter, returns `{ raw, html, coverImage }`
+- `renderCurationContent(content)` — renders markdown content without needing a file read
+- `extractFeatured(content)` — extracts featured story headline, excerpt, and first URL
+- `getSummary(content)` / `getCachedSummary(date)` — summary extraction and caching
+- `validateCurationContent(content)` — editorial validation with errors, warnings, and stats
+- `estimateReadingTime(raw)` / `formatDateEs(dateStr)` — article metadata helpers
 
-- `buildPage(title, body, meta)` — assembles full HTML. Key meta options:
-  - `hideSidebar: true` — renders `.content-layout.content-full` (no sidebar, max 860px centered)
-  - `sidebarHasMore / sidebarHasPrev / sidebarPage` — sidebar pagination controls
-  - `canonicalPath` — used for canonical URL and OG tags
-  - `readingTime` — displayed in the article header
-- `escapeHtml(str)` — HTML-escapes a string; exported and used in routes
+Image safety:
 
----
+- `isBlockedUrl(url)` — rejects private/local/non-http(s) URLs before fetch
+- `isBlockedResolvedUrl(url)` — DNS-aware SSRF protection for hostnames that resolve to blocked IPs
+- `resolveOgImageCandidate(pageUrl, html)` — resolves relative OG image URLs
+- `extractOgImage(url)` — best-effort OG image scraping with timeout and cache
+
+### `app.ts`
+
+- Global security headers middleware
+- Static handling for `/static/*` and `/static/uploads/*`
+- `GET /health` — uptime, file totals, cache stats, metrics, effective config
+- `GET /ready` — upload/draft/version directory readiness and watcher state
+
+### `routes/api.ts`
+
+- Applies per-bucket rate limiting for search, images, publish, drafts, and edits
+- Supports API key auth for write endpoints
+- Saves version snapshots on `PUT` / `PATCH`
+- Publishes from raw content or from a stored draft
+
+### `routes/public.ts`
+
+- Renders today/latest edition, edition detail pages, editions index, and draft preview
+- Handles sidebar pagination on `/` with `SIDEBAR_PAGE_SIZE = 8`
+- Builds featured-story hero metadata and reading time
 
 ## Routes
 
 | Route | Description |
-|-------|-------------|
-| `GET /` | Today's most recent edition (falls back to latest); `?p=N` paginates sidebar (8/page) |
-| `GET /curacion/:date` | Specific edition by file ID (supports `YYYY-MM-DD` and `YYYY-MM-DD_HH-MM`) |
-| `GET /ediciones` | Full list of all editions — no sidebar (`hideSidebar: true`), uses `.content-full` |
-| `GET /api/curations` | Paginated JSON list: `?page=&limit=` (offset) or `?before=&limit=` (cursor) |
-| `GET /api/curations/:date` | Raw markdown content of a specific edition (public) |
-| `PUT /api/curations/:date` | Replace content of an existing edition (requires `X-Api-Key`) |
-| `PATCH /api/curations/:date/meta` | Update only frontmatter fields (requires `X-Api-Key`) |
-| `GET /api/search?q=` | Full-text search across all markdown files (min 2 chars) |
-| `POST /api/publish` | Publish a new edition — ID generated from current Santiago time (requires `X-Api-Key`) |
-| `POST /api/images` | Upload an image file (jpeg/png/webp/gif/avif, max 10 MB) (requires `X-Api-Key`) |
-| `GET /health` | `{ status: "ok", uptime }` |
-| `GET /robots.txt` | `Disallow: /` — blocks all crawlers |
+|------|-------------|
+| `GET /` | Today's latest edition; falls back to latest available; `?p=N` paginates sidebar |
+| `GET /curacion/:date` | Specific edition by ID |
+| `GET /ediciones` | Full editions list |
+| `GET /drafts/:id` | HTML preview for a stored draft |
+| `GET /api/curations` | Paginated JSON list via `?page=` or cursor `?before=` |
+| `GET /api/curations/:date` | Raw markdown content of one edition |
+| `PUT /api/curations/:date` | Replace an existing edition; saves snapshot; requires `X-Api-Key` |
+| `PATCH /api/curations/:date/meta` | Update frontmatter fields only; saves snapshot; requires `X-Api-Key` |
+| `GET /api/curations/:date/versions` | List saved snapshots for an edition; requires `X-Api-Key` |
+| `GET /api/curations/:date/versions/:version` | Read one snapshot; requires `X-Api-Key` |
+| `GET /api/curations/:date/diff/latest` | Diff current edition vs latest snapshot; requires `X-Api-Key` |
+| `GET /api/search?q=` | Full-text search; min length 2 |
+| `POST /api/images` | Image upload; requires `X-Api-Key` |
+| `POST /api/validate` | Validate markdown before publish/edit; requires `X-Api-Key` |
+| `POST /api/publish` | Publish a new edition from content or `draft_id`; requires `X-Api-Key` |
+| `POST /api/drafts` | Create a validated draft; requires `X-Api-Key` |
+| `GET /api/drafts/recent` | Return latest draft plus validation result; requires `X-Api-Key` |
+| `GET /api/drafts/:id` | Return raw draft content plus validation; requires `X-Api-Key` |
+| `POST /api/drafts/:id/publish` | Publish a stored draft; requires `X-Api-Key` |
+| `GET /health` | Operational health |
+| `GET /ready` | Readiness probe |
+| `GET /robots.txt` | `Disallow: /` |
 
----
+## HTTP and security behavior
 
-## Sidebar pagination (`/` only)
+- All responses receive `X-Frame-Options: DENY`, `X-Content-Type-Options: nosniff`, `Referrer-Policy`, and `Content-Security-Policy`
+- `Strict-Transport-Security` is only sent when `SITE_URL` starts with `https://`
+- Public edition pages and API reads use conditional caching helpers (`ETag`, `Last-Modified`)
+- Search and authenticated mutation endpoints are rate-limited in memory by client IP
+- Write routes are disabled when `API_KEY` is not configured
+- The app is private: pages include `noindex, nofollow`, and `/robots.txt` blocks crawlers
 
-- Query param `?p=N` selects which page of 8 editions appears in the sidebar
-- All editions (including multiple per day) are shown, sorted newest first
-- `sidebarHasMore` / `sidebarHasPrev` / `sidebarPage` passed to `buildPage()`
+## Client-side and assets
 
----
+`public/app.js` handles theme toggle, debounced search, mobile menu, scroll-to-top, and floating mobile TOC behavior. Static assets are served from `public/`, and uploaded images are served from `UPLOADS_DIR` through `/static/uploads/*`.
 
-## HTML `<head>` per page
+## Tests
 
-- `noindex, nofollow` + `googlebot: noindex` meta tags (private site)
-- Open Graph and Twitter Card meta tags (uses hero image or `DEFAULT_COVER`)
-- Canonical URL using `SITE_URL + canonicalPath`
-- Security headers via middleware: `X-Frame-Options: DENY`, `X-Content-Type-Options: nosniff`, `Referrer-Policy`, `Content-Security-Policy`; `Strict-Transport-Security` only when `SITE_URL` starts with `https://`
+There is a Bun test suite in `tests/`:
 
----
-
-## Client-side (`public/app.js`)
-
-Theme toggle (persisted in localStorage, respects `prefers-color-scheme`), debounced search calling `/api/search`, scroll-to-top button, mobile hamburger menu, mobile floating TOC button with bottom-sheet panel.
-
----
-
-## Styles (`public/style.css`)
-
-- Sky-blue accent palette (`--blue: #0EA5E9`, `--blue-dark: #0369A1`)
-- Light/dark theme via `[data-theme]` attribute on `<html>`
-- Navbar and footer background: `#1E293B` (slate-800) — contrasts with dark mode page bg `#0A0F1E`
-- Responsive: single-column below 768px, hero stacks vertically on mobile
-- Article body: Inter sans-serif, `text-align: justify`, `hyphens: auto`
-- `hr` elements in article body are hidden (`display: none`)
-- `.content-full` — full-width layout without sidebar (used by `/ediciones`): `max-width: 860px`, centered
-- `.edition-meta` — column flex wrapper for `edition-date` + `edition-title` inside `.edition-card`
-- Sidebar pagination styles: `.sidebar-pagination`, `.sidebar-page-btn`
-
----
+- `tests/curations.test.ts` covers validation, rendering helpers, edition ID validation, and SSRF helpers
+- `tests/app.test.ts` covers health/readiness, ETag behavior, search rate limiting, draft cleanup, version retention, and diff generation
 
 ## Markdown content format
 
-Expected structure the server parses:
+Expected structure:
 
-```
+```md
 ---
-image_url: https://...   ← optional cover image (highest priority for hero)
+image_url: https://...
 ---
-# Title (stripped)
-*Generado ... * (stripped)
+# Title
+
+*Generado ...*
+
 ---
-## 🔥 Featured Story: HEADLINE   ← extracted as hero AND rendered in body
+
+## 🔥 Featured Story: HEADLINE
+
 ...
+
 ## Section
-### Item with [link](url)
+### [Story title](https://example.com)
 ```
 
-Static assets are served from `public/` via the `/static/*` route.
-Uploaded images are served from `UPLOADS_DIR` via `/static/uploads/*` (takes priority over the generic serveStatic).
-
-**Privacy:** The site is private — all pages include `noindex, nofollow` and `/robots.txt` returns `Disallow: /`.
+The validator expects a featured story, section structure, and story links. Frontmatter `image_url` is the highest-priority hero image; otherwise the app tries OG image extraction from the featured link, then falls back to `DEFAULT_COVER`.
