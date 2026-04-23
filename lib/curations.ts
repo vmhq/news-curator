@@ -1,15 +1,39 @@
 import { readdir, readFile } from "fs/promises";
-import { existsSync, watch } from "fs";
+import { existsSync, watch, type FSWatcher } from "fs";
 import { join } from "path";
 import { lookup } from "node:dns/promises";
 import { marked, Renderer } from "marked";
 
-export const CURATIONS_DIR =
+export let CURATIONS_DIR =
   process.env.CURATIONS_DIR ?? "/data/curations";
-export const SITE_URL =
+export let SITE_URL =
   process.env.SITE_URL ?? "http://localhost:8391";
-export const DEFAULT_COVER = `${SITE_URL}/static/cover.svg`;
+export let DEFAULT_COVER = `${SITE_URL}/static/cover.svg`;
 const TZ = "America/Santiago";
+let watcher: FSWatcher | null = null;
+let watcherDir: string | null = null;
+let watcherEventCount = 0;
+let lastWatcherEventAt: string | null = null;
+
+export function configureCurationsEnv(config: {
+  curationsDir?: string;
+  siteUrl?: string;
+}) {
+  const nextCurationsDir = config.curationsDir?.trim();
+  const nextSiteUrl = config.siteUrl?.trim();
+
+  if (nextCurationsDir && nextCurationsDir !== CURATIONS_DIR) {
+    CURATIONS_DIR = nextCurationsDir;
+    invalidateFilesCache();
+    summaryCache.clear();
+    ogImageCache.clear();
+  }
+
+  if (nextSiteUrl && nextSiteUrl !== SITE_URL) {
+    SITE_URL = nextSiteUrl;
+    DEFAULT_COVER = `${SITE_URL}/static/cover.svg`;
+  }
+}
 
 function escapeHtmlInternal(str: string): string {
   return str
@@ -51,9 +75,20 @@ export function invalidateSummaryCache(date: string) {
   summaryCache.delete(date);
 }
 
+export function stopDirWatcher() {
+  watcher?.close();
+  watcher = null;
+  watcherDir = null;
+}
+
 export function startDirWatcher() {
-  if (!existsSync(CURATIONS_DIR)) return;
-  watch(CURATIONS_DIR, (_event: string, filename: string | null) => {
+  if (watcher && watcherDir === CURATIONS_DIR) return true;
+  stopDirWatcher();
+  if (!existsSync(CURATIONS_DIR)) return false;
+
+  watcher = watch(CURATIONS_DIR, (_event: string, filename: string | null) => {
+    watcherEventCount++;
+    lastWatcherEventAt = new Date().toISOString();
     filesCache = null;
     searchIndexCache = null;
     if (filename) {
@@ -62,6 +97,22 @@ export function startDirWatcher() {
       summaryCache.clear();
     }
   });
+  watcherDir = CURATIONS_DIR;
+  return true;
+}
+
+export function getCacheStats() {
+  return {
+    filesCached: filesCache !== null,
+    filesCount: filesCache?.length ?? 0,
+    searchIndexEntries: searchIndexCache?.length ?? 0,
+    summaryEntries: summaryCache.size,
+    ogImageEntries: ogImageCache.size,
+    watcherActive: watcher !== null,
+    watcherDir,
+    watcherEventCount,
+    lastWatcherEventAt,
+  };
 }
 
 export const CURATION_FILE_ID_RE = /^\d{4}-\d{2}-\d{2}(_\d{2}-\d{2})?$/;
@@ -374,6 +425,20 @@ function isBlockedHost(host: string): boolean {
 const MAX_OG_CACHE = 500;
 const MAX_SUMMARY_CACHE = 1000;
 
+export function resolveOgImageCandidate(pageUrl: string, html: string): string | null {
+  const ogMatch =
+    html.match(/<meta[^>]*property=["']og:image["'][^>]*content=["']([^"']+)["']/i) ||
+    html.match(/<meta[^>]*content=["']([^"']+)["'][^>]*property=["']og:image["']/i);
+  const ogImage = ogMatch?.[1] ? new URL(ogMatch[1], pageUrl).toString() : null;
+  if (ogImage && isGoodOgImage(ogImage)) return ogImage;
+
+  const twitterMatch =
+    html.match(/<meta[^>]*name=["']twitter:image["'][^>]*content=["']([^"']+)["']/i) ||
+    html.match(/<meta[^>]*content=["']([^"']+)["'][^>]*name=["']twitter:image["']/i);
+  const twitterImage = twitterMatch?.[1] ? new URL(twitterMatch[1], pageUrl).toString() : null;
+  return twitterImage && isGoodOgImage(twitterImage) ? twitterImage : null;
+}
+
 export async function extractOgImage(url: string): Promise<string | null> {
   if (ogImageCache.has(url)) return ogImageCache.get(url)!;
   if (await isBlockedResolvedUrl(url)) return null;
@@ -386,6 +451,15 @@ export async function extractOgImage(url: string): Promise<string | null> {
       redirect: "error",
       headers: { "User-Agent": "Mozilla/5.0 (compatible; DailyBrief/1.0)" },
     }).finally(() => clearTimeout(timeout));
+    if (!resp.ok) {
+      ogImageCache.set(url, null);
+      return null;
+    }
+    const contentType = resp.headers.get("content-type") ?? "";
+    if (!contentType.includes("html")) {
+      ogImageCache.set(url, null);
+      return null;
+    }
     const reader = resp.body?.getReader();
     let html = "";
     if (reader) {
@@ -399,19 +473,7 @@ export async function extractOgImage(url: string): Promise<string | null> {
       }
       reader.cancel();
     }
-    const ogMatch =
-      html.match(/<meta[^>]*property=["']og:image["'][^>]*content=["']([^"']+)["']/i) ||
-      html.match(/<meta[^>]*content=["']([^"']+)["'][^>]*property=["']og:image["']/i);
-    const ogImage = ogMatch?.[1];
-    if (ogImage && isGoodOgImage(ogImage)) {
-      result = ogImage;
-    } else {
-      const twMatch =
-        html.match(/<meta[^>]*name=["']twitter:image["'][^>]*content=["']([^"']+)["']/i) ||
-        html.match(/<meta[^>]*content=["']([^"']+)["'][^>]*name=["']twitter:image["']/i);
-      const twitterImage = twMatch?.[1];
-      if (twitterImage && isGoodOgImage(twitterImage)) result = twitterImage;
-    }
+    result = resolveOgImageCandidate(url, html);
   } catch {
     // best-effort
   }

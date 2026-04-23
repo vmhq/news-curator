@@ -1,0 +1,144 @@
+import { existsSync } from "fs";
+import { mkdir, readFile } from "fs/promises";
+import { basename, join } from "path";
+import { Hono } from "hono";
+import { serveStatic } from "hono/bun";
+import type { RuntimeConfigInput } from "./lib/config.ts";
+import { createApiKeyGuard } from "./lib/auth.ts";
+import { type AppDeps } from "./lib/app-deps.ts";
+import { loadRuntimeConfig } from "./lib/config.ts";
+import { configureCurationsEnv, getCacheStats, getCurationFiles, startDirWatcher, stopDirWatcher } from "./lib/curations.ts";
+import { logEvent } from "./lib/logging.ts";
+import { getMetricsSnapshot, recordRequest } from "./lib/observability.ts";
+import { InMemoryRateLimiter } from "./lib/rate-limit.ts";
+import { runRetentionPass } from "./lib/retention.ts";
+import { registerApiRoutes } from "./routes/api.ts";
+import { registerPublicRoutes } from "./routes/public.ts";
+
+export function createApp(overrides: RuntimeConfigInput = {}) {
+  const config = loadRuntimeConfig(overrides);
+  configureCurationsEnv({ curationsDir: config.curationsDir, siteUrl: config.siteUrl });
+
+  if (config.enableWatcher) {
+    startDirWatcher();
+  } else {
+    stopDirWatcher();
+  }
+
+  runRetentionPass(config).catch((error) => {
+    console.error("Failed to run retention pass", error);
+  });
+
+  if (!config.apiKey) {
+    console.warn("API_KEY not set — authenticated routes are disabled");
+  }
+
+  const app = new Hono();
+  const deps: AppDeps = {
+    config,
+    apiKeyGuard: createApiKeyGuard(config.apiKey),
+    rateLimiter: new InMemoryRateLimiter(),
+    startedAt: Date.now(),
+  };
+
+  app.use("*", async (c, next) => {
+    recordRequest();
+    await next();
+    c.res.headers.set("X-Frame-Options", "DENY");
+    c.res.headers.set("X-Content-Type-Options", "nosniff");
+    c.res.headers.set("Referrer-Policy", "strict-origin-when-cross-origin");
+    c.res.headers.set(
+      "Content-Security-Policy",
+      "default-src 'self'; script-src 'self'; style-src 'self' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' https: data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'self';"
+    );
+    if (config.siteUrl.startsWith("https://")) {
+      c.res.headers.set("Strict-Transport-Security", "max-age=31536000; includeSubDomains");
+    }
+  });
+
+  app.use("/static/uploads/*", async (c, next) => {
+    const filename = basename(c.req.path.slice("/static/uploads/".length));
+    if (!filename) return next();
+
+    const filePath = join(config.uploadsDir, filename);
+    try {
+      const data = await readFile(filePath);
+      const ext = filename.split(".").pop()?.toLowerCase() ?? "";
+      const mime: Record<string, string> = {
+        jpg: "image/jpeg",
+        jpeg: "image/jpeg",
+        png: "image/png",
+        webp: "image/webp",
+        gif: "image/gif",
+        avif: "image/avif",
+        svg: "image/svg+xml",
+      };
+      return c.body(data, 200, {
+        "Content-Type": mime[ext] ?? "application/octet-stream",
+        "Cache-Control": "public, max-age=31536000, immutable",
+      });
+    } catch {
+      return next();
+    }
+  });
+
+  app.use(
+    "/static/*",
+    serveStatic({
+      root: "./",
+      rewriteRequestPath: (path) => path.replace("/static/", "public/"),
+    })
+  );
+
+  app.get("/robots.txt", (c) =>
+    c.text("User-agent: *\nDisallow: /\n", 200, { "Content-Type": "text/plain" })
+  );
+
+  app.get("/health", async (c) => {
+    const files = await getCurationFiles();
+    const latestEdition = files[0] ?? null;
+    return c.json({
+      status: "ok",
+      uptime: process.uptime(),
+      latestEdition,
+      files: { total: files.length },
+      caches: getCacheStats(),
+      metrics: {
+        ...getMetricsSnapshot(),
+        rateLimiter: deps.rateLimiter.snapshot(),
+      },
+      config: {
+        apiKeyConfigured: deps.apiKeyGuard.enabled,
+        curationsDir: config.curationsDir,
+        uploadsDir: config.uploadsDir,
+        draftsDir: config.draftsDir,
+        versionsDir: config.versionsDir,
+        draftTtlHours: config.draftTtlHours,
+        maxVersionsPerEdition: config.maxVersionsPerEdition,
+      },
+    });
+  });
+
+  app.get("/ready", async (c) => {
+    try {
+      await mkdir(config.uploadsDir, { recursive: true });
+      await mkdir(config.draftsDir, { recursive: true });
+      await mkdir(config.versionsDir, { recursive: true });
+
+      return c.json({
+        status: "ready",
+        watcherEnabled: config.enableWatcher,
+        watcherActive: getCacheStats().watcherActive,
+        curationsDirExists: existsSync(config.curationsDir),
+      });
+    } catch (error) {
+      logEvent("app.readiness_failed", { error: error instanceof Error ? error.message : String(error) });
+      return c.json({ status: "not_ready" }, 503);
+    }
+  });
+
+  registerApiRoutes(app, deps);
+  registerPublicRoutes(app, deps);
+
+  return app;
+}

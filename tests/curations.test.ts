@@ -5,6 +5,7 @@ import {
   isBlockedUrl,
   isCurationFileId,
   renderCurationContent,
+  resolveOgImageCandidate,
   validateCurationContent,
 } from "../lib/curations.ts";
 
@@ -81,6 +82,15 @@ describe("curation rendering", () => {
 
     expect(featured?.headline).toBe("OpenAI presenta una mejora importante para agentes");
     expect(featured?.firstUrl).toBe("https://example.com/openai-agents");
+  });
+
+  test("resolves relative OG image URLs against the source page", () => {
+    const image = resolveOgImageCandidate(
+      "https://example.com/story",
+      '<html><head><meta property="og:image" content="/images/lead.png"></head></html>'
+    );
+
+    expect(image).toBe("https://example.com/images/lead.png");
   });
 });
 

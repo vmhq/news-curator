@@ -69,15 +69,28 @@ bun install
 bun run dev          # con hot-reload
 bun run start        # sin hot-reload
 PORT=3000 bun run start
+bun test             # tests unitarios + integración
 ```
 
 ## Estructura del proyecto
 
 ```
 news-curator/
-├── server.ts              # Rutas, endpoints API y middleware
+├── server.ts              # Entrada Bun y export default { port, fetch }
+├── app.ts                 # createApp() y wiring principal
 ├── lib/
-│   └── curations.ts       # I/O, caché en memoria, parsing, utilidades de fecha
+│   ├── auth.ts            # Validación de API key
+│   ├── config.ts          # Configuración runtime y rate limits
+│   ├── curations.ts       # I/O, caché en memoria, parsing, utilidades de fecha
+│   ├── diff.ts            # Diff línea a línea para snapshots
+│   ├── frontmatter.ts     # Parse/serialize de frontmatter + validación image_url
+│   ├── http-cache.ts      # ETag / Last-Modified helpers
+│   ├── logging.ts         # Logs estructurados
+│   ├── observability.ts   # Métricas runtime
+│   └── retention.ts       # Limpieza de drafts y snapshots viejos
+├── routes/
+│   ├── api.ts             # Endpoints JSON y operaciones autenticadas
+│   └── public.ts          # Páginas HTML server-rendered
 ├── templates/
 │   └── layout.ts          # buildPage() — HTML completo + escapeHtml
 ├── public/
@@ -132,15 +145,18 @@ DAILY_BRIEF_URL=       # URL base del servidor, ej: https://dailyb.vmhq.cl
 | `UPLOADS_DIR` | `public/uploads` | Directorio de imágenes subidas vía API. En Docker apunta a `/data/uploads` (volumen persistente) para que las imágenes sobrevivan rebuilds |
 | `DRAFTS_DIR` | `${CURATIONS_DIR}/.drafts` | Directorio para borradores generados por agentes antes de publicar |
 | `VERSIONS_DIR` | `${CURATIONS_DIR}/.versions` | Directorio para snapshots automáticos antes de editar ediciones |
+| `DRAFT_TTL_HOURS` | `72` | Horas antes de eliminar drafts viejos automáticamente |
+| `MAX_VERSIONS_PER_EDITION` | `20` | Máximo de snapshots guardados por edición |
 
 ## Seguridad
 
 - **API key** — todos los endpoints de escritura requieren `X-Api-Key` o `Authorization: Bearer <key>`. Comparación con `timingSafeEqual` para prevenir timing attacks.
-- **Rate limiting** — `/api/search` acepta máx 20 requests/10s por IP. El mapa de IPs tiene un cap de 10.000 entradas para prevenir DoS por memoria.
+- **Rate limiting** — `/api/search`, `/api/images`, `/api/publish`, `/api/drafts` y endpoints de edición tienen límites por IP en memoria.
 - **Headers de seguridad** — `X-Frame-Options: DENY`, `X-Content-Type-Options: nosniff`, `Referrer-Policy`, `Content-Security-Policy` aplicados en todos los responses. `Strict-Transport-Security` se activa automáticamente cuando `SITE_URL` usa `https://`.
 - **SSRF** — la función `extractOgImage` bloquea IPs privadas, loopback, link-local e IPv6 especiales. Redirects desactivados (`redirect: "error"`). Timeout de 5s.
 - **Path traversal** — los uploads se validan con `path.basename()` para rechazar cualquier componente de directorio en el nombre de archivo.
 - **XSS** — el HTML renderizado desde markdown usa un renderer personalizado que escapa tags raw. Los links solo permiten protocolos `http:` y `https:`.
+- **Cache HTTP** — las páginas de edición y la API pública usan `ETag` y `Last-Modified` para respuestas condicionales.
 - **Privacidad** — `noindex, nofollow` en todas las páginas + `/robots.txt` con `Disallow: /`.
 
 ## Rutas HTTP
@@ -153,8 +169,10 @@ DAILY_BRIEF_URL=       # URL base del servidor, ej: https://dailyb.vmhq.cl
 | `GET` | `/api/curations` | JSON paginado (`?page=&limit=` o `?before=&limit=`) |
 | `GET` | `/api/search` | Búsqueda full-text (`?q=`) |
 | `GET` | `/health` | Estado del servidor |
+| `GET` | `/ready` | Readiness check de directorios y watcher |
 | `POST` | `/api/validate` | Validar markdown antes de publicar (requiere `X-Api-Key`) |
 | `POST` | `/api/drafts` | Crear borrador validado y obtener URL de preview (requiere `X-Api-Key`) |
+| `GET` | `/api/drafts/recent` | Último draft disponible con estado de validación (requiere `X-Api-Key`) |
 | `GET` | `/api/drafts/:id` | Leer borrador raw + resultado de validación (requiere `X-Api-Key`) |
 | `GET` | `/drafts/:id` | Vista previa HTML del borrador |
 | `POST` | `/api/drafts/:id/publish` | Publicar un borrador validado (requiere `X-Api-Key`) |
@@ -164,6 +182,7 @@ DAILY_BRIEF_URL=       # URL base del servidor, ej: https://dailyb.vmhq.cl
 | `PATCH` | `/api/curations/:date/meta` | Actualizar solo frontmatter (requiere `X-Api-Key`) |
 | `GET` | `/api/curations/:date/versions` | Listar snapshots de una edición (requiere `X-Api-Key`) |
 | `GET` | `/api/curations/:date/versions/:version` | Leer un snapshot raw (requiere `X-Api-Key`) |
+| `GET` | `/api/curations/:date/diff/latest` | Diff entre la edición actual y el snapshot más reciente (requiere `X-Api-Key`) |
 | `POST` | `/api/images` | Subir imagen propia para usar como portada (requiere `X-Api-Key`) |
 
 Ver [`.claude/commands/curar.md`](./.claude/commands/curar.md) para la referencia completa de la API y el formato del contenido.
@@ -180,8 +199,13 @@ Ver [`.claude/commands/curar.md`](./.claude/commands/curar.md) para la referenci
 - Borradores con preview HTML antes de publicar
 - Snapshots automáticos en cada `PUT`/`PATCH` para recuperar versiones previas
 - Logs estructurados JSON para publicación, validación, drafts y snapshots
+- Health ampliado con métricas, estado de cachés, watcher y configuración efectiva
+- Readiness endpoint para supervisión operativa
 - Paginación cursor-based en `/api/curations` (`?before=&limit=`) además de offset (`?page=&limit=`)
 - Tiempo estimado de lectura por edición
+- Limpieza automática de drafts expirados y retención configurable de snapshots
+- Endpoint para recuperar el draft más reciente
+- Diff del último snapshot para revisar cambios editoriales
 - TOC flotante móvil con panel bottom-sheet
 - Tema claro/oscuro (localStorage + `prefers-color-scheme`)
 - Búsqueda full-text con debounce

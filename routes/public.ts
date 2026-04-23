@@ -1,0 +1,295 @@
+import { existsSync } from "fs";
+import { readFile, stat } from "fs/promises";
+import { join } from "path";
+import type { Hono } from "hono";
+import type { AppDeps } from "../lib/app-deps.ts";
+import {
+  CURATIONS_DIR,
+  allEditionsSidebar,
+  dateFromFileId,
+  estimateReadingTime,
+  extractFeatured,
+  extractOgImage,
+  formatDateEs,
+  getCachedSummary,
+  getCurationFiles,
+  isCurationFileId,
+  readCuration,
+  renderCurationContent,
+  todayLocal,
+  validateCurationContent,
+} from "../lib/curations.ts";
+import { applyCacheHeaders, makeWeakEtag, maybeReturnNotModified } from "../lib/http-cache.ts";
+import { buildPage, escapeHtml } from "../templates/layout.ts";
+
+const SIDEBAR_PAGE_SIZE = 8;
+
+function extractGeneratedAt(raw: string): string | undefined {
+  const generatedMatch = raw.match(/\*(?:Generated at|Generado .+?)\s(.+?)\*/);
+  return generatedMatch?.[1];
+}
+
+async function getRecentCurations(files: string[], limit: number) {
+  const settled = await Promise.allSettled(
+    files.slice(0, limit).map(async (date) => ({ date, summary: await getCachedSummary(date) }))
+  );
+
+  return settled
+    .filter((result): result is PromiseFulfilledResult<{ date: string; summary: string }> => result.status === "fulfilled")
+    .map((result) => result.value);
+}
+
+function buildDraftValidationPanel(validation: {
+  valid: boolean;
+  errors: Array<{ code: string; message: string }>;
+  warnings: Array<{ code: string; message: string }>;
+}) {
+  const errorItems = validation.errors
+    .map((issue) => `<li><strong>${escapeHtml(issue.code)}</strong>: ${escapeHtml(issue.message)}</li>`)
+    .join("");
+  const warningItems = validation.warnings
+    .map((issue) => `<li><strong>${escapeHtml(issue.code)}</strong>: ${escapeHtml(issue.message)}</li>`)
+    .join("");
+
+  return `
+    <section class="empty-state">
+      <h2>Preview de draft</h2>
+      <p>Publicable: <strong>${validation.valid ? "si" : "no"}</strong>. Errores: ${validation.errors.length}. Advertencias: ${validation.warnings.length}.</p>
+      ${validation.errors.length ? `<h3>Errores</h3><ul>${errorItems}</ul>` : ""}
+      ${validation.warnings.length ? `<h3>Advertencias</h3><ul>${warningItems}</ul>` : ""}
+    </section>
+  `;
+}
+
+export function registerPublicRoutes(app: Hono, deps: AppDeps) {
+  app.get("/", async (c) => {
+    const files = await getCurationFiles();
+    let targetDate = files.find((file) => dateFromFileId(file) === todayLocal()) ?? null;
+    let isToday = true;
+
+    if (!targetDate && files.length > 0) {
+      targetDate = files[0] ?? null;
+      isToday = false;
+    }
+
+    if (!targetDate) {
+      const response = c.html(
+        buildPage(
+          "Daily Brief",
+          `
+        <div class="empty-state">
+          <div class="empty-icon">📰</div>
+          <h2>Daily Brief</h2>
+          <p>Las curaciones apareceran aqui una vez generadas.<br>Vuelve pronto.</p>
+        </div>
+      `,
+          { recentCurations: [] }
+        )
+      );
+      response.headers.set("Cache-Control", "no-store");
+      return response;
+    }
+
+    const curation = await readCuration(targetDate);
+    if (!curation) {
+      const response = c.html(
+        buildPage(
+          "Daily Brief",
+          `
+        <div class="empty-state">
+          <div class="empty-icon">📰</div>
+          <h2>Daily Brief</h2>
+          <p>Error al leer la curacion.</p>
+        </div>
+      `,
+          { recentCurations: [] }
+        )
+      );
+      response.headers.set("Cache-Control", "no-store");
+      return response;
+    }
+
+    const generatedAt = extractGeneratedAt(curation.raw);
+    const featured = extractFeatured(curation.raw);
+    const readingTime = estimateReadingTime(curation.raw);
+
+    let heroImage: string | null = curation.coverImage;
+    if (!heroImage && featured?.firstUrl) heroImage = await extractOgImage(featured.firstUrl);
+
+    const page = Math.max(1, Number.parseInt(c.req.query("p") || "1", 10) || 1);
+    const sidebarFiles = allEditionsSidebar(files);
+    const sidebarOffset = (page - 1) * SIDEBAR_PAGE_SIZE;
+    const recentCurations = await getRecentCurations(
+      sidebarFiles.slice(sidebarOffset, sidebarOffset + SIDEBAR_PAGE_SIZE),
+      SIDEBAR_PAGE_SIZE
+    );
+
+    const idx = files.indexOf(targetDate);
+    const nextDate = idx > 0 ? files[idx - 1] : null;
+    const prevDate = idx >= 0 && idx < files.length - 1 ? files[idx + 1] : null;
+
+    const response = c.html(
+      buildPage(`Daily Brief — ${formatDateEs(targetDate)}`, curation.html, {
+        date: targetDate,
+        isToday,
+        generatedAt,
+        recentCurations,
+        prevDate,
+        nextDate,
+        featured,
+        heroImage,
+        canonicalPath: isToday ? "/" : `/curacion/${targetDate}`,
+        sidebarHasMore: sidebarOffset + SIDEBAR_PAGE_SIZE < sidebarFiles.length,
+        sidebarHasPrev: page > 1,
+        sidebarPage: page,
+        readingTime,
+      })
+    );
+    response.headers.set("Cache-Control", "no-store");
+    return response;
+  });
+
+  app.get("/curacion/:date", async (c) => {
+    const date = c.req.param("date");
+    if (!isCurationFileId(date)) return c.text("Fecha invalida", 400);
+
+    const filePath = join(CURATIONS_DIR, `${date}.md`);
+    if (existsSync(filePath)) {
+      const info = await stat(filePath);
+      const etag = makeWeakEtag(date, info.size, info.mtimeMs);
+      const notModified = maybeReturnNotModified(c, {
+        etag,
+        lastModified: info.mtime,
+        cacheControl: "private, must-revalidate",
+      });
+      if (notModified) return notModified;
+    }
+
+    const files = await getCurationFiles();
+    const curation = await readCuration(date);
+
+    if (!curation) {
+      return c.html(
+        buildPage(
+          "Daily Brief — No encontrada",
+          `
+        <div class="empty-state">
+          <div class="empty-icon">🔍</div>
+          <h2>Edicion no encontrada</h2>
+          <p>No existe curacion para <strong>${escapeHtml(date)}</strong>.</p>
+          <a href="/" class="back-link">← Volver a hoy</a>
+        </div>
+      `,
+          { recentCurations: (await getRecentCurations(allEditionsSidebar(files), SIDEBAR_PAGE_SIZE)) }
+        ),
+        404
+      );
+    }
+
+    const generatedAt = extractGeneratedAt(curation.raw);
+    const featured = extractFeatured(curation.raw);
+    const readingTime = estimateReadingTime(curation.raw);
+
+    let heroImage: string | null = curation.coverImage;
+    if (!heroImage && featured?.firstUrl) heroImage = await extractOgImage(featured.firstUrl);
+
+    const recentCurations = await getRecentCurations(allEditionsSidebar(files), SIDEBAR_PAGE_SIZE);
+    const idx = files.indexOf(date);
+    const nextDate = idx > 0 ? files[idx - 1] : null;
+    const prevDate = idx >= 0 && idx < files.length - 1 ? files[idx + 1] : null;
+
+    const response = c.html(
+      buildPage(`Daily Brief — ${formatDateEs(date)}`, curation.html, {
+        date,
+        isToday: dateFromFileId(date) === todayLocal(),
+        generatedAt,
+        recentCurations,
+        prevDate,
+        nextDate,
+        featured,
+        heroImage,
+        canonicalPath: `/curacion/${date}`,
+        sidebarHasMore: allEditionsSidebar(files).length > SIDEBAR_PAGE_SIZE,
+        sidebarHasPrev: false,
+        sidebarPage: 1,
+        readingTime,
+      })
+    );
+
+    if (existsSync(filePath)) {
+      const info = await stat(filePath);
+      applyCacheHeaders(response.headers, {
+        etag: makeWeakEtag(date, info.size, info.mtimeMs),
+        lastModified: info.mtime,
+        cacheControl: "private, must-revalidate",
+      });
+    }
+
+    return response;
+  });
+
+  app.get("/ediciones", async (c) => {
+    const files = await getCurationFiles();
+    const etag = makeWeakEtag("ediciones", ...files);
+    const notModified = maybeReturnNotModified(c, {
+      etag,
+      cacheControl: "private, max-age=60, must-revalidate",
+    });
+    if (notModified) return notModified;
+
+    const allCurations = await getRecentCurations(files, files.length);
+    const listHtml = allCurations.length
+      ? allCurations
+          .map(
+            (curation) => `
+    <a href="/curacion/${escapeHtml(curation.date)}" class="edition-card">
+      <div class="edition-meta">
+        <span class="edition-date">${escapeHtml(formatDateEs(curation.date))}</span>
+        <h3 class="edition-title">${escapeHtml(curation.summary)}</h3>
+      </div>
+      <span class="edition-arrow">→</span>
+    </a>
+  `
+          )
+          .join("\n")
+      : '<div class="empty-state"><div class="empty-icon">📋</div><h2>Sin ediciones</h2></div>';
+
+    const response = c.html(
+      buildPage("Daily Brief — Todas las Ediciones", listHtml, {
+        recentCurations: allCurations.slice(0, 5),
+        canonicalPath: "/ediciones",
+        hideSidebar: true,
+      })
+    );
+    applyCacheHeaders(response.headers, {
+      etag,
+      cacheControl: "private, max-age=60, must-revalidate",
+    });
+    return response;
+  });
+
+  app.get("/drafts/:id", async (c) => {
+    const draftId = c.req.param("id");
+    if (!/^[a-f0-9-]{36}$/i.test(draftId)) return c.text("Draft invalido", 400);
+
+    const draftPath = join(deps.config.draftsDir, `${draftId}.md`);
+    if (!existsSync(draftPath)) return c.text("Draft no encontrado", 404);
+
+    const content = await readFile(draftPath, "utf-8");
+    const rendered = await renderCurationContent(content);
+    const validation = validateCurationContent(content);
+    const featured = extractFeatured(content);
+    const readingTime = estimateReadingTime(content);
+    const validationPanel = buildDraftValidationPanel(validation);
+
+    return c.html(
+      buildPage(`Daily Brief — Draft ${draftId.slice(0, 8)}`, `${validationPanel}${rendered.html}`, {
+        featured,
+        heroImage: rendered.coverImage,
+        canonicalPath: `/drafts/${draftId}`,
+        hideSidebar: true,
+        readingTime,
+      })
+    );
+  });
+}
