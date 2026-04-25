@@ -107,6 +107,25 @@ export function createApp(overrides: RuntimeConfigInput = {}) {
         ...getMetricsSnapshot(),
         rateLimiter: deps.rateLimiter.snapshot(),
       },
+    });
+  });
+
+  app.use("/health/internal", async (c, next) => {
+    await deps.apiKeyGuard.requireApiKey(c, next, "Internal health endpoint disabled: API_KEY not configured");
+  });
+  app.get("/health/internal", async (c) => {
+    const files = await getCurationFiles();
+    const latestEdition = files[0] ?? null;
+    return c.json({
+      status: "ok",
+      uptime: process.uptime(),
+      latestEdition,
+      files: { total: files.length },
+      caches: getCacheStats(),
+      metrics: {
+        ...getMetricsSnapshot(),
+        rateLimiter: deps.rateLimiter.snapshot(),
+      },
       config: {
         apiKeyConfigured: deps.apiKeyGuard.enabled,
         curationsDir: config.curationsDir,

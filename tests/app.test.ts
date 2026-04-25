@@ -92,8 +92,15 @@ describe("app integration", () => {
 
     expect(healthJson.status).toBe("ok");
     expect(healthJson.files.total).toBe(1);
-    expect(healthJson.config.apiKeyConfigured).toBe(true);
+    expect(healthJson.config).toBeUndefined();
     expect(readyJson.status).toBe("ready");
+
+    const internalHealth = await app.request("/health/internal", {
+      headers: { "X-Api-Key": "secret-key" },
+    });
+    expect(internalHealth.status).toBe(200);
+    const internalJson = await internalHealth.json();
+    expect(internalJson.config.apiKeyConfigured).toBe(true);
   });
 
   test("redirects preview bots and /latest to the most recent edition URL", async () => {

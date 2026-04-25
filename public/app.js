@@ -318,7 +318,26 @@ document.addEventListener("DOMContentLoaded", () => {
     if (snippet) {
       const snipEl = document.createElement("span");
       snipEl.className = "cmd-item-snippet";
-      snipEl.innerHTML = snippet; // pre-escaped by server
+
+      // Decode server-escaped entities without executing any HTML, then
+      // rebuild <mark> elements safely via DOM construction.
+      const safe = document.createElement("textarea");
+      safe.innerHTML = snippet;
+      const decoded = safe.value;
+
+      const parts = decoded.split(/<mark>|<\/mark>/g);
+      let inMark = false;
+      for (const part of parts) {
+        if (inMark) {
+          const mark = document.createElement("mark");
+          mark.textContent = part;
+          snipEl.appendChild(mark);
+        } else if (part) {
+          snipEl.appendChild(document.createTextNode(part));
+        }
+        inMark = !inMark;
+      }
+
       a.appendChild(snipEl);
     }
 

@@ -1,7 +1,10 @@
 import { readdir, readFile } from "fs/promises";
 import { existsSync, watch, type FSWatcher } from "fs";
 import { join } from "path";
-import { lookup } from "node:dns/promises";
+import { Resolver } from "node:dns/promises";
+
+const ssrfResolver = new Resolver();
+ssrfResolver.setServers(["1.1.1.1", "8.8.8.8"]);
 import { marked, Renderer } from "marked";
 
 export let CURATIONS_DIR =
@@ -409,9 +412,9 @@ export async function isBlockedResolvedUrl(url: string): Promise<boolean> {
   if (isBlockedUrl(url)) return true;
   try {
     const parsed = new URL(url);
-    const addresses = await lookup(parsed.hostname, { all: true, verbatim: true });
+    const addresses = await ssrfResolver.resolve(parsed.hostname);
     if (addresses.length === 0) return true;
-    return addresses.some((addr) => isBlockedHost(addr.address));
+    return addresses.some((addr: string) => isBlockedHost(addr));
   } catch {
     return true;
   }
