@@ -23,6 +23,8 @@ import { applyCacheHeaders, makeWeakEtag, maybeReturnNotModified } from "../lib/
 import { buildPage, escapeHtml } from "../templates/layout.ts";
 
 const SIDEBAR_PAGE_SIZE = 8;
+const PREVIEW_BOT_RE =
+  /(TelegramBot|Slackbot|Discordbot|Twitterbot|facebookexternalhit|Facebot|LinkedInBot|WhatsApp|SkypeUriPreview)/i;
 
 function extractGeneratedAt(raw: string): string | undefined {
   const generatedMatch = raw.match(/\*(?:Generated at|Generado .+?)\s(.+?)\*/);
@@ -61,16 +63,38 @@ function buildDraftValidationPanel(validation: {
   `;
 }
 
+function getLatestEditionTarget(files: string[]) {
+  const todayEdition = files.find((file) => dateFromFileId(file) === todayLocal()) ?? null;
+  if (todayEdition) return { targetDate: todayEdition, isToday: true };
+
+  return {
+    targetDate: files[0] ?? null,
+    isToday: false,
+  };
+}
+
+function isPreviewBot(userAgent: string | undefined | null): boolean {
+  if (!userAgent) return false;
+  return PREVIEW_BOT_RE.test(userAgent);
+}
+
 export function registerPublicRoutes(app: Hono, deps: AppDeps) {
+  app.get("/latest", async (c) => {
+    const files = await getCurationFiles();
+    const { targetDate } = getLatestEditionTarget(files);
+
+    if (!targetDate) {
+      return c.redirect("/", 302);
+    }
+
+    const response = c.redirect(`/curacion/${targetDate}`, 302);
+    response.headers.set("Cache-Control", "no-store");
+    return response;
+  });
+
   app.get("/", async (c) => {
     const files = await getCurationFiles();
-    let targetDate = files.find((file) => dateFromFileId(file) === todayLocal()) ?? null;
-    let isToday = true;
-
-    if (!targetDate && files.length > 0) {
-      targetDate = files[0] ?? null;
-      isToday = false;
-    }
+    const { targetDate, isToday } = getLatestEditionTarget(files);
 
     if (!targetDate) {
       const response = c.html(
@@ -86,6 +110,12 @@ export function registerPublicRoutes(app: Hono, deps: AppDeps) {
           { recentCurations: [] }
         )
       );
+      response.headers.set("Cache-Control", "no-store");
+      return response;
+    }
+
+    if (isPreviewBot(c.req.header("user-agent"))) {
+      const response = c.redirect(`/curacion/${targetDate}`, 302);
       response.headers.set("Cache-Control", "no-store");
       return response;
     }

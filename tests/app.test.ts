@@ -96,6 +96,29 @@ describe("app integration", () => {
     expect(readyJson.status).toBe("ready");
   });
 
+  test("redirects preview bots and /latest to the most recent edition URL", async () => {
+    await writeFile(
+      join(curationsDir, "2026-04-23_15-06.md"),
+      validEdition.replace("09:00", "15:06"),
+      "utf-8"
+    );
+
+    const app = buildApp();
+
+    const latest = await app.request("/latest", { redirect: "manual" });
+    expect(latest.status).toBe(302);
+    expect(latest.headers.get("location")).toBe("/curacion/2026-04-23_15-06");
+    expect(latest.headers.get("cache-control")).toBe("no-store");
+
+    const preview = await app.request("/", {
+      headers: { "user-agent": "TelegramBot (like TwitterBot)" },
+      redirect: "manual",
+    });
+    expect(preview.status).toBe(302);
+    expect(preview.headers.get("location")).toBe("/curacion/2026-04-23_15-06");
+    expect(preview.headers.get("cache-control")).toBe("no-store");
+  });
+
   test("returns ETag and supports conditional requests for public edition API", async () => {
     const app = buildApp();
 
