@@ -117,10 +117,10 @@ export function getCacheStats() {
 
 export const CURATION_FILE_ID_RE = /^\d{4}-\d{2}-\d{2}(_\d{2}-\d{2})?$/;
 const CURATION_FILENAME_RE = /^\d{4}-\d{2}-\d{2}(_\d{2}-\d{2})?\.md$/;
-const FEATURED_HEADING_RE = /^## (?:(?:🔥\s*)?Featured Story|Noticia principal):\s*/gim;
+const FEATURED_HEADING_RE = /^## (?:(?:🔥\s*(?:Featured Story:\s*)?)|Noticia principal:\s*)/gim;
 const FEATURED_SECTION_RE =
-  /## (?:(?:🔥\s*)?Featured Story|Noticia principal):\s*(.+?)\n\n([\s\S]*?)(?=\n---|\n## (?!\s*(?:(?:🔥\s*)?Featured Story|Noticia principal):)|$)/i;
-const FEATURED_HEADING_LABEL_RE = /^(?:(?:🔥\s*)?Featured Story|Noticia principal):\s*/i;
+  /## (?:(?:🔥\s*(?:Featured Story:\s*)?)|Noticia principal:\s*)(.+?)\n\n([\s\S]*?)(?=\n---|\n## (?!\s*(?:(?:🔥\s*(?:Featured Story:\s*)?)|Noticia principal:\s*))|$)/i;
+const FEATURED_HEADING_LABEL_RE = /^(?:🔥(?:\s*Featured Story:)?|Noticia principal:)\s*/i;
 
 export function isCurationFileId(id: string): boolean {
   return CURATION_FILE_ID_RE.test(id);

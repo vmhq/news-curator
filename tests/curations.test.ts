@@ -92,6 +92,15 @@ describe("curation rendering", () => {
     expect(featured?.headline).toBe("OpenAI presenta una mejora importante para agentes");
   });
 
+  test("keeps backward compatibility with legacy emoji-only heading", async () => {
+    const legacyEdition = validEdition.replace("## Noticia principal:", "## 🔥");
+    const featured = extractFeatured(legacyEdition);
+    const rendered = await renderCurationContent(legacyEdition);
+
+    expect(featured?.headline).toBe("OpenAI presenta una mejora importante para agentes");
+    expect(rendered.html).not.toContain("🔥");
+  });
+
   test("resolves relative OG image URLs against the source page", () => {
     const image = resolveOgImageCandidate(
       "https://example.com/story",
