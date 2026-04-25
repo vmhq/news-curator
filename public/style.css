@@ -970,7 +970,7 @@ mark {
 .pagination {
   max-width: var(--max-width);
   margin: 0 auto;
-  padding: 0 32px 64px;
+  padding: 0 32px 32px;
   display: flex;
   justify-content: space-between;
   gap: 16px;
@@ -1248,6 +1248,10 @@ mark {
   background: var(--bg-2);
   padding: 0;
 }
+
+.pagination + .footer {
+  margin-top: 32px;
+}
 .footer-inner, .footer-in {
   max-width: var(--max-width);
   margin: 0 auto;
@@ -1477,7 +1481,8 @@ mark {
   .segmented .nav-actions { margin-left: auto; }
   .mag { padding: 32px 20px 64px; }
   .content-layout { padding: 0 20px 40px; gap: 40px; }
-  .pagination { padding: 0 20px 48px; }
+  .pagination { padding: 0 20px 24px; }
+  .pagination + .footer { margin-top: 24px; }
   .brand { font-size: 19px; }
   .pill-btn .kbd,
   .cmd-trigger-label,
