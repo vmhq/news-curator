@@ -8,19 +8,33 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 bun install        # Install dependencies
 bun run server.ts  # Start the server (also: bun run dev / bun run start)
 PORT=3000 bun run server.ts  # Custom port (default: 8391)
+bun test           # Run test suite
 ```
 
-Server runs on `http://localhost:8391`. There are no tests or linting configured.
+Server runs on `http://localhost:8391`. There are Bun tests in `tests/` (no linting configured).
+
+## Stack
+
+- **Runtime:** Bun
+- **Framework:** Hono `^4.12.15`
+- **Markdown:** Marked `^18.0.2`
+- All HTML is server-rendered — no frontend build step or framework.
 
 ## Architecture
 
-Multi-file server using **Bun** runtime + **Hono** framework. All HTML is server-rendered — no frontend build step or framework.
-
 | File | Responsibility |
 |------|---------------|
-| `server.ts` | Routes, API endpoints, middleware |
-| `lib/curations.ts` | File I/O, in-memory caches, markdown parsing, date utilities |
-| `templates/layout.ts` | `buildPage()` — full HTML assembly |
+| `server.ts` | Bun entrypoint; exports `{ port, fetch }` |
+| `app.ts` | `createApp()` app assembly, middleware, static files, health/readiness, route registration |
+| `routes/public.ts` | Public HTML pages (`/`, `/curacion/:date`, `/ediciones`, `/drafts/:id`) |
+| `routes/api.ts` | JSON API, authenticated write endpoints, drafts, versions, diff, uploads |
+| `lib/config.ts` | Runtime config loading and rate-limit defaults |
+| `lib/curations.ts` | File I/O, caches, markdown rendering/parsing, search index, validation, OG image helpers |
+| `lib/frontmatter.ts` | Frontmatter parse/serialize and `image_url` validation |
+| `lib/http-cache.ts` | ETag / Last-Modified helpers |
+| `lib/rate-limit.ts` | In-memory per-IP rate limiting |
+| `lib/retention.ts` | Draft cleanup and version retention |
+| `templates/layout.ts` | `buildPage()` and `escapeHtml()` |
 
 **Data source**: Markdown files at the path set by `CURATIONS_DIR` env var (defaults to `/data/curations`). Filenames follow the pattern `YYYY-MM-DD.md` or `YYYY-MM-DD_HH-MM.md` (multiple editions per day). The server reads files at request time — caches in memory, invalidated by a `fs.watch` watcher.
 
@@ -57,9 +71,15 @@ Multi-file server using **Bun** runtime + **Hono** framework. All HTML is server
 
 **Image handling:**
 - `isBlockedUrl(url)` — rejects private IPs, loopback, link-local, `.internal`/`.local`/`.localhost` domains, and non-http(s) protocols (SSRF protection)
+- `isBlockedResolvedUrl(url)` — DNS-aware SSRF protection for hostnames that resolve to blocked IPs
 - `isGoodOgImage(imgUrl)` — rejects URLs matching `LOGO_PATTERNS` (logos, icons, favicons) or tiny images
 - `extractOgImage(url)` — fetches a URL, scrapes `og:image` or `twitter:image`, validates with `isGoodOgImage()` (5s timeout, reads max 50 KB, best-effort); cached in `ogImageCache` (max 500 entries)
 - Hero image priority: `coverImage` from frontmatter → `extractOgImage()` from featured URL → `DEFAULT_COVER`
+
+### `lib/retention.ts`
+
+- `cleanupExpiredDrafts()` — removes drafts older than `DRAFT_TTL_HOURS` (default 72)
+- `trimVersionSnapshots()` — enforces `MAX_VERSIONS_PER_EDITION` (default 20) per edition
 
 ### `templates/layout.ts`
 
@@ -79,14 +99,24 @@ Multi-file server using **Bun** runtime + **Hono** framework. All HTML is server
 | `GET /` | Today's most recent edition (falls back to latest); `?p=N` paginates sidebar (8/page) |
 | `GET /curacion/:date` | Specific edition by file ID (supports `YYYY-MM-DD` and `YYYY-MM-DD_HH-MM`) |
 | `GET /ediciones` | Full list of all editions — no sidebar (`hideSidebar: true`), uses `.content-full` |
+| `GET /drafts/:id` | HTML preview for a stored draft |
 | `GET /api/curations` | Paginated JSON list: `?page=&limit=` (offset) or `?before=&limit=` (cursor) |
 | `GET /api/curations/:date` | Raw markdown content of a specific edition (public) |
-| `PUT /api/curations/:date` | Replace content of an existing edition (requires `X-Api-Key`) |
-| `PATCH /api/curations/:date/meta` | Update only frontmatter fields (requires `X-Api-Key`) |
+| `PUT /api/curations/:date` | Replace content of an existing edition; saves snapshot (requires `X-Api-Key`) |
+| `PATCH /api/curations/:date/meta` | Update only frontmatter fields; saves snapshot (requires `X-Api-Key`) |
+| `GET /api/curations/:date/versions` | List saved snapshots for an edition (requires `X-Api-Key`) |
+| `GET /api/curations/:date/versions/:version` | Read one snapshot raw (requires `X-Api-Key`) |
+| `GET /api/curations/:date/diff/latest` | Diff current edition vs latest snapshot (requires `X-Api-Key`) |
 | `GET /api/search?q=` | Full-text search across all markdown files (min 2 chars) |
+| `POST /api/validate` | Validate markdown before publish/edit (requires `X-Api-Key`) |
 | `POST /api/publish` | Publish a new edition — ID generated from current Santiago time (requires `X-Api-Key`) |
+| `POST /api/drafts` | Create a validated draft and get preview URL (requires `X-Api-Key`) |
+| `GET /api/drafts/recent` | Latest draft available with validation status (requires `X-Api-Key`) |
+| `GET /api/drafts/:id` | Read draft raw + validation result (requires `X-Api-Key`) |
+| `POST /api/drafts/:id/publish` | Publish a validated draft (requires `X-Api-Key`) |
 | `POST /api/images` | Upload an image file (jpeg/png/webp/gif/avif, max 10 MB) (requires `X-Api-Key`) |
-| `GET /health` | `{ status: "ok", uptime }` |
+| `GET /health` | Operational health — uptime, file totals, cache stats, metrics, effective config |
+| `GET /ready` | Readiness check — upload/draft/version directory readiness and watcher state |
 | `GET /robots.txt` | `Disallow: /` — blocks all crawlers |
 
 ---
@@ -105,6 +135,26 @@ Multi-file server using **Bun** runtime + **Hono** framework. All HTML is server
 - Open Graph and Twitter Card meta tags (uses hero image or `DEFAULT_COVER`)
 - Canonical URL using `SITE_URL + canonicalPath`
 - Security headers via middleware: `X-Frame-Options: DENY`, `X-Content-Type-Options: nosniff`, `Referrer-Policy`, `Content-Security-Policy`; `Strict-Transport-Security` only when `SITE_URL` starts with `https://`
+
+---
+
+## HTTP and security behavior
+
+- All responses receive `X-Frame-Options: DENY`, `X-Content-Type-Options: nosniff`, `Referrer-Policy`, and `Content-Security-Policy`
+- `Strict-Transport-Security` is only sent when `SITE_URL` starts with `https://`
+- Public edition pages and API reads use conditional caching helpers (`ETag`, `Last-Modified`)
+- Search and authenticated mutation endpoints are rate-limited in memory by client IP
+- Write routes are disabled when `API_KEY` is not configured
+- The app is private: pages include `noindex, nofollow`, and `/robots.txt` blocks crawlers
+
+---
+
+## Tests
+
+Bun test suite in `tests/`:
+
+- `tests/curations.test.ts` — validation, rendering helpers, edition ID validation, and SSRF helpers
+- `tests/app.test.ts` — health/readiness, ETag behavior, search rate limiting, draft cleanup, version retention, and diff generation
 
 ---
 

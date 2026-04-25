@@ -5,7 +5,8 @@ Aplicación web de curación de noticias de tecnología e IA, publicadas diariam
 ## Stack
 
 - **Runtime:** [Bun](https://bun.sh)
-- **Framework:** [Hono](https://hono.dev)
+- **Framework:** [Hono](https://hono.dev) `^4.12.15`
+- **Markdown:** [Marked](https://marked.js.org) `^18.0.2`
 - **Renderizado:** HTML server-side, sin build step
 - **Contenido:** archivos Markdown en `/data/curations/` (volumen Docker)
 

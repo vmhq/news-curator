@@ -13,6 +13,13 @@ bun test           # Run test suite
 
 Server runs on `http://localhost:8391` by default. There is no lint script configured.
 
+## Stack
+
+- **Runtime:** Bun
+- **Framework:** Hono `^4.12.15`
+- **Markdown:** Marked `^18.0.2`
+- All HTML is server-rendered; there is no frontend build step.
+
 ## Architecture
 
 Multi-file server using **Bun** runtime + **Hono** framework. All HTML is server-rendered; there is no frontend build step.
