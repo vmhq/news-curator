@@ -117,6 +117,10 @@ export function getCacheStats() {
 
 export const CURATION_FILE_ID_RE = /^\d{4}-\d{2}-\d{2}(_\d{2}-\d{2})?$/;
 const CURATION_FILENAME_RE = /^\d{4}-\d{2}-\d{2}(_\d{2}-\d{2})?\.md$/;
+const FEATURED_HEADING_RE = /^## (?:(?:🔥\s*)?Featured Story|Noticia principal):\s*/gim;
+const FEATURED_SECTION_RE =
+  /## (?:(?:🔥\s*)?Featured Story|Noticia principal):\s*(.+?)\n\n([\s\S]*?)(?=\n---|\n## (?!\s*(?:(?:🔥\s*)?Featured Story|Noticia principal):)|$)/i;
+const FEATURED_HEADING_LABEL_RE = /^(?:(?:🔥\s*)?Featured Story|Noticia principal):\s*/i;
 
 export function isCurationFileId(id: string): boolean {
   return CURATION_FILE_ID_RE.test(id);
@@ -228,8 +232,8 @@ export async function renderCurationContent(
   display = display.replace(/^\*Generado .+\*\n+/, "");
   display = display.replace(/^\*Generated at .+\*\n+/, "");
   display = display.replace(/^---\n+/, "");
-  // Normalize Featured Story heading: strip "Featured Story:" prefix for consistent rendering
-  display = display.replace(/^(## 🔥)\s*Featured Story:\s*/gm, "$1 ");
+  // Normalize featured heading to a plain editorial H2 for consistent rendering.
+  display = display.replace(FEATURED_HEADING_RE, "## ");
   const html = await marked.parse(display);
   return { raw, html, coverImage };
 }
@@ -237,7 +241,7 @@ export async function renderCurationContent(
 export function extractFeatured(
   content: string
 ): { category: string; headline: string; body: string; firstUrl: string | null } | null {
-  const match = content.match(/## 🔥(?:\s*Featured Story:\s*)?(.+?)\n\n([\s\S]*?)(?=\n---|\n## [^🔥])/);
+  const match = content.match(FEATURED_SECTION_RE);
   if (!match?.[1] || !match[2]) return null;
   const headline = match[1].trim().replace(/\[([^\]]+)\]\([^)]+\)/g, "$1");
   const rawBody = (match[2].trim().split("\n\n")[0] ?? "").replace(/\[([^\]]+)\]\([^)]+\)/g, "$1");
@@ -305,7 +309,12 @@ export function validateCurationContent(content: string): CurationValidationResu
 
   const featured = extractFeatured(content);
   if (!featured) {
-    pushIssue(errors, "error", "featured_missing", "Falta la sección destacada con heading ## 🔥 Featured Story: ...");
+    pushIssue(
+      errors,
+      "error",
+      "featured_missing",
+      "Falta la sección destacada con heading ## Noticia principal: ..."
+    );
   } else {
     if (featured.headline.length < 12) {
       pushIssue(errors, "error", "featured_headline_short", "El titular destacado es demasiado corto.");
@@ -319,7 +328,7 @@ export function validateCurationContent(content: string): CurationValidationResu
   }
 
   const h2Headings = Array.from(content.matchAll(/^## (.+)$/gm)).map((m) => m[1]?.trim() ?? "");
-  const sections = h2Headings.filter((h) => !h.startsWith("🔥")).length;
+  const sections = h2Headings.filter((h) => !FEATURED_HEADING_LABEL_RE.test(h)).length;
   if (sections === 0) {
     pushIssue(errors, "error", "sections_missing", "Debe existir al menos una sección H2 además de la historia destacada.");
   }

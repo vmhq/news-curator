@@ -15,7 +15,7 @@ image_url: ""
 
 ---
 
-## 🔥 Featured Story: OpenAI presenta una mejora importante para agentes
+## Noticia principal: OpenAI presenta una mejora importante para agentes
 
 La compañía anunció una nueva capacidad para agentes de IA orientada a flujos de trabajo largos, con mejor seguimiento de tareas, validación de resultados y controles para mantener acciones seguras.
 

@@ -18,7 +18,7 @@ image_url: ""
 
 ---
 
-## 🔥 Featured Story: OpenAI presenta una mejora importante para agentes
+## Noticia principal: OpenAI presenta una mejora importante para agentes
 
 La compañía anunció una nueva capacidad para agentes de IA orientada a flujos de trabajo largos, con mejor seguimiento de tareas, validación de resultados y controles para mantener acciones seguras.
 
@@ -75,6 +75,7 @@ describe("curation rendering", () => {
     expect(rendered.html).not.toContain("<h1>");
     expect(rendered.html).toContain("OpenAI presenta una mejora importante");
     expect(rendered.html).not.toContain("Featured Story:");
+    expect(rendered.html).not.toContain("Noticia principal:");
   });
 
   test("extracts the featured story excerpt and first URL", () => {
@@ -82,6 +83,13 @@ describe("curation rendering", () => {
 
     expect(featured?.headline).toBe("OpenAI presenta una mejora importante para agentes");
     expect(featured?.firstUrl).toBe("https://example.com/openai-agents");
+  });
+
+  test("keeps backward compatibility with legacy featured heading", () => {
+    const legacyEdition = validEdition.replace("## Noticia principal:", "## 🔥 Featured Story:");
+    const featured = extractFeatured(legacyEdition);
+
+    expect(featured?.headline).toBe("OpenAI presenta una mejora importante para agentes");
   });
 
   test("resolves relative OG image URLs against the source page", () => {

@@ -68,7 +68,7 @@ Rendering and parsing:
 
 - `readCuration(date)` — reads markdown, parses frontmatter, returns `{ raw, html, coverImage }`
 - `renderCurationContent(content)` — renders markdown content without needing a file read
-- `extractFeatured(content)` — extracts featured story headline, excerpt, and first URL
+- `extractFeatured(content)` — extracts the `Noticia principal` headline, excerpt, and first URL; keeps compatibility with the legacy emoji heading
 - `getSummary(content)` / `getCachedSummary(date)` — summary extraction and caching
 - `validateCurationContent(content)` — editorial validation with errors, warnings, and stats
 - `estimateReadingTime(raw)` / `formatDateEs(dateStr)` — article metadata helpers
@@ -161,7 +161,7 @@ image_url: https://...
 
 ---
 
-## 🔥 Featured Story: HEADLINE
+## Noticia principal: HEADLINE
 
 ...
 
@@ -169,4 +169,4 @@ image_url: https://...
 ### [Story title](https://example.com)
 ```
 
-The validator expects a featured story, section structure, and story links. Frontmatter `image_url` is the highest-priority hero image; otherwise the app tries OG image extraction from the featured link, then falls back to `DEFAULT_COVER`.
+The validator expects a `## Noticia principal: ...` section, regular content sections, and story links. Legacy content using `## 🔥 Featured Story: ...` is still accepted for backward compatibility. Frontmatter `image_url` is the highest-priority hero image; otherwise the app tries OG image extraction from the featured link, then falls back to `DEFAULT_COVER`.

@@ -195,7 +195,7 @@ Ver [`.claude/commands/curar.md`](./.claude/commands/curar.md) para la referenci
 - Subida de imágenes propias via `POST /api/images` (jpeg, png, webp, gif, avif — máx 10 MB)
 - Caché en memoria con invalidación automática vía watcher de directorio (`fs.watch`)
 - API de edición: `PUT /api/curations/:date` (reemplazar contenido) y `PATCH /api/curations/:date/meta` (actualizar solo frontmatter)
-- Validación editorial para agentes: estructura requerida, featured story, secciones, historias, links inseguros, duplicados y estadísticas
+- Validación editorial para agentes: estructura requerida, noticia principal, secciones, historias, links inseguros, duplicados y estadísticas
 - Borradores con preview HTML antes de publicar
 - Snapshots automáticos en cada `PUT`/`PATCH` para recuperar versiones previas
 - Logs estructurados JSON para publicación, validación, drafts y snapshots
@@ -219,3 +219,13 @@ Ver [`.claude/commands/curar.md`](./.claude/commands/curar.md) para la referenci
 3. Crear un borrador con `POST /api/drafts`.
 4. Revisar `previewUrl` si se requiere supervisión humana.
 5. Publicar con `POST /api/drafts/:id/publish` o `POST /api/publish` usando `{ "draft_id": "..." }`.
+
+## Formato de markdown esperado
+
+La convención actual para identificar la historia destacada es un encabezado H2 textual:
+
+```md
+## Noticia principal: TITULAR
+```
+
+El parser mantiene compatibilidad con el formato legado `## 🔥 Featured Story: ...`, pero los agentes deberían generar desde ahora `## Noticia principal: ...` para mantener una presentación editorial más sobria y consistente.

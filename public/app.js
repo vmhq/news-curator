@@ -3,6 +3,7 @@
 // ═══════════════════════════════════════
 
 document.addEventListener("DOMContentLoaded", () => {
+  const FEATURED_PREFIX_RE = /^(?:[\p{Emoji_Presentation}\p{Extended_Pictographic}\uFE0F\u200D]+\s*)?(?:Featured Story|Noticia principal):\s*/iu;
 
   // ─── Theme Toggle ─────────────────────────────────────────────
   const html = document.documentElement;
@@ -103,8 +104,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
   if (tocContainer && tocNav && h2Entries.length >= 2) {
     tocHeadings.forEach(({ id, text, level }) => {
-      // Strip leading emoji sequences and common prefixes like "🔥 Featured Story:"
-      const cleanText = text.replace(/^[\p{Emoji_Presentation}\p{Extended_Pictographic}\uFE0F\u200D]+\s*/u, "").trim();
+      const cleanText = text.replace(FEATURED_PREFIX_RE, "").trim();
       const a = document.createElement("a");
       a.href = `#${id}`;
       a.className = `toc-item${level === "H3" ? " toc-h3" : ""}`;
@@ -165,7 +165,7 @@ document.addEventListener("DOMContentLoaded", () => {
   if (mobileTocNavEl && h2Entries.length >= 2) {
     // Populate with the same headings as the desktop TOC
     tocHeadings.forEach(({ id, text, level }) => {
-      const cleanText = text.replace(/^[\p{Emoji_Presentation}\p{Extended_Pictographic}\uFE0F\u200D]+\s*/u, "").trim();
+      const cleanText = text.replace(FEATURED_PREFIX_RE, "").trim();
       const a = document.createElement("a");
       a.href = `#${id}`;
       a.className = `mobile-toc-item${level === "H3" ? " mobile-toc-h3" : ""}`;

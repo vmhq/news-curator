@@ -49,8 +49,8 @@ Multi-file server using **Bun** runtime + **Hono** framework. All HTML is server
 - `todayLocal()` — today's date as `YYYY-MM-DD` using `America/Santiago` timezone
 
 **Parsing:**
-- `readCuration(date)` — reads a markdown file; extracts `coverImage` from frontmatter (`image_url:` field), strips frontmatter/H1/timestamp line, normalizes `## 🔥 Featured Story:` heading (strips "Featured Story:" prefix for consistent rendering), returns `{ raw, html, coverImage }`. The featured story block appears in both the hero and the article body.
-- `extractFeatured(content)` — parses the `## 🔥` section; excerpt is the first full paragraph (`split("\n\n")[0]`), truncated at 280 chars on a word boundary with `…`; also extracts `firstUrl`
+- `readCuration(date)` — reads a markdown file; extracts `coverImage` from frontmatter (`image_url:` field), strips frontmatter/H1/timestamp line, normalizes `## Noticia principal:` heading (and accepts the legacy `## 🔥 Featured Story:` form) for consistent rendering, returns `{ raw, html, coverImage }`. The featured story block appears in both the hero and the article body.
+- `extractFeatured(content)` — parses the `## Noticia principal:` section (and keeps compatibility with the legacy emoji form); excerpt is the first full paragraph (`split("\n\n")[0]`), truncated at 280 chars on a word boundary with `…`; also extracts `firstUrl`
 - `getSummary(content)` — extracts a short title from the first `### ` or `## ` heading, trimmed at word boundary
 - `formatDateEs(dateStr)` — formats a file ID to Spanish date string; if the ID has a time suffix, appends `(HH:MM)` e.g. `"Miércoles 8 de abril de 2026 (22:21)"`
 - `estimateReadingTime(raw)` — returns estimated reading time in minutes (words / 200, minimum 1)
@@ -139,7 +139,7 @@ image_url: https://...   ← optional cover image (highest priority for hero)
 # Title (stripped)
 *Generado ... * (stripped)
 ---
-## 🔥 Featured Story: HEADLINE   ← extracted as hero AND rendered in body
+## Noticia principal: HEADLINE   ← extracted as hero AND rendered in body
 ...
 ## Section
 ### Item with [link](url)
