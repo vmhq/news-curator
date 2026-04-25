@@ -371,7 +371,7 @@ export function buildPage(
     </div>
   </nav>
 
-  <main class="main mag">
+  <main class="main mag${navHtml ? " main-with-pagination" : ""}">
     ${heroHtml}
     ${statsHtml}
     ${feedHtml}

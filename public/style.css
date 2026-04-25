@@ -335,6 +335,11 @@ img { display: block; max-width: 100%; }
   padding: 48px 32px 80px;
 }
 
+.main-with-pagination {
+  min-height: auto;
+  padding-bottom: 32px;
+}
+
 /* ─── Hero ─── */
 .hero {
   display: grid;
@@ -1480,6 +1485,7 @@ mark {
   .seg-meta { display: none; }
   .segmented .nav-actions { margin-left: auto; }
   .mag { padding: 32px 20px 64px; }
+  .main-with-pagination { padding-bottom: 24px; }
   .content-layout { padding: 0 20px 40px; gap: 40px; }
   .pagination { padding: 0 20px 24px; }
   .pagination + .footer { margin-top: 24px; }
