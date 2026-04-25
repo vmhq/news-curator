@@ -180,6 +180,110 @@ describe("app integration", () => {
     expect(recentJson.previewUrl).toContain("/drafts/");
   });
 
+  test("publishes a new edition from raw content", async () => {
+    const app = buildApp();
+    const response = await app.request("/api/publish", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-Api-Key": "secret-key",
+      },
+      body: JSON.stringify({ content: validEdition.replace("mejora importante", "nueva entrega editorial") }),
+    });
+
+    expect(response.status).toBe(201);
+    const json = await response.json();
+    expect(json.success).toBe(true);
+    expect(json.edition).toMatch(/^\d{4}-\d{2}-\d{2}_\d{2}-\d{2}$/);
+    expect(json.url).toBe(`/curacion/${json.edition}`);
+
+    const saved = await readFile(join(curationsDir, `${json.edition}.md`), "utf-8");
+    expect(saved).toContain("nueva entrega editorial");
+  });
+
+  test("publishes a stored draft as a new edition", async () => {
+    const app = buildApp();
+    const headers = {
+      "Content-Type": "application/json",
+      "X-Api-Key": "secret-key",
+    };
+
+    const draft = await app.request("/api/drafts", {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ content: validEdition.replace("mejora importante", "borrador listo para publicar") }),
+    });
+    expect(draft.status).toBe(201);
+    const draftJson = await draft.json();
+
+    const published = await app.request(`/api/drafts/${draftJson.draft}/publish`, {
+      method: "POST",
+      headers: { "X-Api-Key": "secret-key" },
+    });
+    expect(published.status).toBe(201);
+
+    const publishedJson = await published.json();
+    expect(publishedJson.success).toBe(true);
+    expect(publishedJson.draft).toBe(draftJson.draft);
+    expect(publishedJson.edition).toMatch(/^\d{4}-\d{2}-\d{2}_\d{2}-\d{2}$/);
+
+    const saved = await readFile(join(curationsDir, `${publishedJson.edition}.md`), "utf-8");
+    expect(saved).toContain("borrador listo para publicar");
+  });
+
+  test("updates an existing edition and refreshes search without watcher", async () => {
+    const app = buildApp();
+    const headers = {
+      "Content-Type": "application/json",
+      "X-Api-Key": "secret-key",
+    };
+
+    const initialSearch = await app.request("/api/search?q=benchmark");
+    expect(initialSearch.status).toBe(200);
+    expect((await initialSearch.json()).results.length).toBeGreaterThan(0);
+
+    const updated = validEdition.replace("Nuevo benchmark mide agentes autónomos", "Telemetria cuantica mide agentes autónomos");
+    const response = await app.request("/api/curations/2026-04-23", {
+      method: "PUT",
+      headers,
+      body: JSON.stringify({ content: updated }),
+    });
+    expect(response.status).toBe(200);
+
+    const saved = await readFile(join(curationsDir, "2026-04-23.md"), "utf-8");
+    expect(saved).toContain("Telemetria cuantica");
+
+    const refreshedSearch = await app.request("/api/search?q=telemetria");
+    expect(refreshedSearch.status).toBe(200);
+    const refreshedJson = await refreshedSearch.json();
+    expect(refreshedJson.results).toHaveLength(1);
+    expect(refreshedJson.results[0].date).toBe("2026-04-23");
+  });
+
+  test("patches edition frontmatter and stores a version snapshot", async () => {
+    const app = buildApp();
+    const response = await app.request("/api/curations/2026-04-23/meta", {
+      method: "PATCH",
+      headers: {
+        "Content-Type": "application/json",
+        "X-Api-Key": "secret-key",
+      },
+      body: JSON.stringify({ source: "manual-review" }),
+    });
+
+    expect(response.status).toBe(200);
+    const json = await response.json();
+    expect(json.success).toBe(true);
+    expect(json.meta.source).toBe("manual-review");
+
+    const saved = await readFile(join(curationsDir, "2026-04-23.md"), "utf-8");
+    expect(saved).toContain('source: "manual-review"');
+    expect(saved).toContain("### [Nuevo benchmark mide agentes autónomos]");
+
+    const versionFiles = await readdir(join(versionsDir, "2026-04-23"));
+    expect(versionFiles.some((file) => file.endsWith("-meta.md"))).toBe(true);
+  });
+
   test("stores bounded version history and exposes diff with the latest snapshot", async () => {
     const app = buildApp();
     const headers = {

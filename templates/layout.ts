@@ -1,13 +1,7 @@
 import { SITE_URL, DEFAULT_COVER, formatDateEs, dateFromFileId } from "../lib/curations.ts";
+import { escapeHtml } from "../lib/html.ts";
 
-export function escapeHtml(str: string): string {
-  return str
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;")
-    .replace(/'/g, "&#39;");
-}
+export { escapeHtml } from "../lib/html.ts";
 
 const MONTHS_SHORT_ES = ["ENE", "FEB", "MAR", "ABR", "MAY", "JUN", "JUL", "AGO", "SEP", "OCT", "NOV", "DIC"];
 

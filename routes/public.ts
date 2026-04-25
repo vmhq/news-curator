@@ -19,8 +19,10 @@ import {
   todayLocal,
   validateCurationContent,
 } from "../lib/curations.ts";
+import { escapeHtml } from "../lib/html.ts";
+import { isDraftId } from "../lib/ids.ts";
 import { applyCacheHeaders, makeWeakEtag, maybeReturnNotModified } from "../lib/http-cache.ts";
-import { buildPage, escapeHtml } from "../templates/layout.ts";
+import { buildPage } from "../templates/layout.ts";
 
 const SIDEBAR_PAGE_SIZE = 8;
 const PREVIEW_BOT_RE =
@@ -300,7 +302,7 @@ export function registerPublicRoutes(app: Hono, deps: AppDeps) {
 
   app.get("/drafts/:id", async (c) => {
     const draftId = c.req.param("id");
-    if (!/^[a-f0-9-]{36}$/i.test(draftId)) return c.text("Draft invalido", 400);
+    if (!isDraftId(draftId)) return c.text("Draft invalido", 400);
 
     const draftPath = join(deps.config.draftsDir, `${draftId}.md`);
     if (!existsSync(draftPath)) return c.text("Draft no encontrado", 404);

@@ -26,16 +26,23 @@ Multi-file server using **Bun** runtime + **Hono** framework. All HTML is server
 
 | File | Responsibility |
 |------|---------------|
-| `server.ts` | Bun entrypoint; exports `{ port, fetch }` |
+| `server.ts` | Bun entrypoint; exports `{ port, fetch }` and `createApp` |
 | `app.ts` | `createApp()` app assembly, middleware, static files, health/readiness, route registration |
-| `routes/public.ts` | Public HTML pages (`/`, `/curacion/:date`, `/ediciones`, `/drafts/:id`) |
+| `routes/public.ts` | Public HTML pages (`/`, `/latest`, `/curacion/:date`, `/ediciones`, `/drafts/:id`) |
 | `routes/api.ts` | JSON API, authenticated write endpoints, drafts, versions, diff, uploads |
+| `lib/app-deps.ts` | Shared dependency type for route registration |
+| `lib/auth.ts` | API key guard via `X-Api-Key` or `Authorization: Bearer` |
 | `lib/config.ts` | Runtime config loading and rate-limit defaults |
 | `lib/curations.ts` | File I/O, caches, markdown rendering/parsing, search index, validation, OG image helpers |
 | `lib/frontmatter.ts` | Frontmatter parse/serialize and `image_url` validation |
+| `lib/html.ts` | Shared HTML escaping helper |
 | `lib/http-cache.ts` | ETag / Last-Modified helpers |
+| `lib/ids.ts` | Shared edition, draft, and version ID validation helpers |
 | `lib/rate-limit.ts` | In-memory per-IP rate limiting |
 | `lib/retention.ts` | Draft cleanup and version retention |
+| `lib/diff.ts` | Line diff generation for edition snapshots |
+| `lib/logging.ts` | JSON structured event logging |
+| `lib/observability.ts` | In-memory request and action counters |
 | `templates/layout.ts` | `buildPage()` and `escapeHtml()` |
 
 ## Runtime data and configuration
@@ -66,6 +73,7 @@ File handling and caches:
 - `searchCurations(query, limit)` — full-text search over a cached in-memory index
 - `invalidateFilesCache()` — clears file/index caches
 - `invalidateSummaryCache(date)` — evicts one summary entry
+- `invalidateCurationCache(date)` — evicts one summary entry and clears the search index after edits
 - `startDirWatcher()` / `stopDirWatcher()` — manage `fs.watch`
 - `getCacheStats()` — cache and watcher status for `/health`
 - `isCurationFileId(id)` / `CURATION_FILE_ID_RE` — canonical edition ID validation
@@ -91,7 +99,8 @@ Image safety:
 
 - Global security headers middleware
 - Static handling for `/static/*` and `/static/uploads/*`
-- `GET /health` — uptime, file totals, cache stats, metrics, effective config
+- `GET /health` — uptime, file totals, cache stats, and metrics
+- `GET /health/internal` — authenticated health endpoint with effective config
 - `GET /ready` — upload/draft/version directory readiness and watcher state
 
 ### `routes/api.ts`
@@ -104,6 +113,7 @@ Image safety:
 ### `routes/public.ts`
 
 - Renders today/latest edition, edition detail pages, editions index, and draft preview
+- Redirects `/latest` and preview bots to the canonical latest edition URL
 - Handles sidebar pagination on `/` with `SIDEBAR_PAGE_SIZE = 8`
 - Builds featured-story hero metadata and reading time
 
@@ -112,6 +122,7 @@ Image safety:
 | Route | Description |
 |------|-------------|
 | `GET /` | Today's latest edition; falls back to latest available; `?p=N` paginates sidebar |
+| `GET /latest` | Redirect to the canonical latest edition URL |
 | `GET /curacion/:date` | Specific edition by ID |
 | `GET /ediciones` | Full editions list |
 | `GET /drafts/:id` | HTML preview for a stored draft |
@@ -131,6 +142,7 @@ Image safety:
 | `GET /api/drafts/:id` | Return raw draft content plus validation; requires `X-Api-Key` |
 | `POST /api/drafts/:id/publish` | Publish a stored draft; requires `X-Api-Key` |
 | `GET /health` | Operational health |
+| `GET /health/internal` | Authenticated health with effective config |
 | `GET /ready` | Readiness probe |
 | `GET /robots.txt` | `Disallow: /` |
 
@@ -145,14 +157,14 @@ Image safety:
 
 ## Client-side and assets
 
-`public/app.js` handles theme toggle, debounced search, mobile menu, scroll-to-top, and floating mobile TOC behavior. Static assets are served from `public/`, and uploaded images are served from `UPLOADS_DIR` through `/static/uploads/*`.
+`public/app.js` handles theme toggle, command palette search, mobile menu, scroll-to-top, reading progress, revista/feed view switching, and floating mobile TOC behavior. Static assets are served from `public/`, and uploaded images are served from `UPLOADS_DIR` through `/static/uploads/*`.
 
 ## Tests
 
 There is a Bun test suite in `tests/`:
 
 - `tests/curations.test.ts` covers validation, rendering helpers, edition ID validation, and SSRF helpers
-- `tests/app.test.ts` covers health/readiness, ETag behavior, search rate limiting, draft cleanup, version retention, and diff generation
+- `tests/app.test.ts` covers health/readiness, `/latest`, ETag behavior, search rate limiting, publish, draft publish, edit, frontmatter patch, search invalidation after edit, draft cleanup, version retention, and diff generation
 
 ## Markdown content format
 

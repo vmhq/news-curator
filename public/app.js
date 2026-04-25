@@ -355,12 +355,6 @@ document.addEventListener("DOMContentLoaded", () => {
     selectedIndex = index;
   }
 
-  function esc(str) {
-    const d = document.createElement("div");
-    d.textContent = str;
-    return d.innerHTML;
-  }
-
   async function fetchResults(q) {
     try {
       const res  = await fetch(`/api/search?q=${encodeURIComponent(q)}`);

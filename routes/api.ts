@@ -1,5 +1,5 @@
 import { existsSync } from "fs";
-import { mkdir, readFile, readdir, stat, utimes, writeFile } from "fs/promises";
+import { mkdir, readFile, readdir, stat, writeFile } from "fs/promises";
 import { basename, join } from "path";
 import type { Context, Hono, Next } from "hono";
 import type { AppDeps } from "../lib/app-deps.ts";
@@ -9,18 +9,20 @@ import {
   CURATIONS_DIR,
   getCachedSummary,
   getCurationFiles,
+  invalidateCurationCache,
   invalidateFilesCache,
-  invalidateSummaryCache,
   isCurationFileId,
   searchCurations,
+  type CurationValidationResult,
   validateCurationContent,
 } from "../lib/curations.ts";
+import { escapeHtml } from "../lib/html.ts";
 import { applyCacheHeaders, makeWeakEtag, maybeReturnNotModified } from "../lib/http-cache.ts";
+import { isDraftId, isVersionId } from "../lib/ids.ts";
 import { logEvent } from "../lib/logging.ts";
 import { incrementCounter } from "../lib/observability.ts";
 import { getRequestIp } from "../lib/rate-limit.ts";
 import { cleanupExpiredDrafts, trimVersionHistory } from "../lib/retention.ts";
-import { escapeHtml } from "../templates/layout.ts";
 
 function editionIdFromNow(): string {
   const now = new Date();
@@ -59,6 +61,44 @@ async function saveVersionSnapshot(date: string, content: string, reason: string
   await writeFile(join(dir, filename), content, "utf-8");
   await trimVersionHistory(date, deps.config);
   logEvent("curation.version_saved", { edition: date, version: filename, reason: safeReason });
+}
+
+async function publishCurationContent(
+  content: string,
+  deps: AppDeps,
+  options: {
+    metric: Parameters<typeof incrementCounter>[0];
+    event: string;
+    extraLog?: Record<string, unknown>;
+    extraResponse?: Record<string, unknown>;
+  }
+): Promise<{ status: number; body: Record<string, unknown>; validation: CurationValidationResult } | { status: number; body: Record<string, unknown> }> {
+  if (content.length < 10 || content.length > 1_000_000) {
+    return { status: 400, body: { error: "Content length out of range (10–1_000_000 chars)" } };
+  }
+
+  const validation = validateCurationContent(content);
+  if (!validation.valid) {
+    return { status: 422, body: { error: "Validation failed", validation }, validation };
+  }
+
+  const editionId = editionIdFromNow();
+  await mkdir(CURATIONS_DIR, { recursive: true });
+  await writeFile(join(CURATIONS_DIR, `${editionId}.md`), content, "utf-8");
+  invalidateFilesCache();
+  incrementCounter(options.metric);
+
+  const warning = await checkImageUrl(content, deps.config);
+  logEvent(options.event, { ...options.extraLog, edition: editionId, warnings: validation.warnings.length });
+  const body: Record<string, unknown> = {
+    success: true,
+    ...options.extraResponse,
+    edition: editionId,
+    url: `/curacion/${editionId}`,
+    validation,
+  };
+  if (warning) body.warning = warning;
+  return { status: 201, body, validation };
 }
 
 function createRateLimitMiddleware(deps: AppDeps, bucket: keyof AppDeps["config"]["rateLimits"]) {
@@ -240,7 +280,7 @@ export function registerApiRoutes(app: Hono, deps: AppDeps) {
       const body = await c.req.json();
       if (typeof body.draft_id === "string") {
         const draftId = body.draft_id;
-        if (!/^[a-f0-9-]{36}$/i.test(draftId)) return c.json({ error: "Invalid draft_id" }, 400);
+        if (!isDraftId(draftId)) return c.json({ error: "Invalid draft_id" }, 400);
         const draftPath = join(deps.config.draftsDir, `${draftId}.md`);
         if (!existsSync(draftPath)) return c.json({ error: "Draft not found" }, 404);
         content = await readFile(draftPath, "utf-8");
@@ -253,36 +293,19 @@ export function registerApiRoutes(app: Hono, deps: AppDeps) {
       content = await c.req.text();
     }
 
-    if (content.length < 10 || content.length > 1_000_000) {
-      return c.json({ error: "Content length out of range (10–1_000_000 chars)" }, 400);
-    }
-
-    const validation = validateCurationContent(content);
-    if (!validation.valid) {
+    const published = await publishCurationContent(content, deps, {
+      metric: "publishes",
+      event: "curation.published",
+    });
+    if (published.status === 422 && "validation" in published) {
       logEvent("curation.publish_rejected", {
-        errors: validation.errors.length,
-        warnings: validation.warnings.length,
+        errors: published.validation.errors.length,
+        warnings: published.validation.warnings.length,
       });
-      return c.json({ error: "Validation failed", validation }, 422);
     }
-
-    const editionId = editionIdFromNow();
-    await mkdir(CURATIONS_DIR, { recursive: true });
-    await writeFile(join(CURATIONS_DIR, `${editionId}.md`), content, "utf-8");
-    invalidateFilesCache();
-    incrementCounter("publishes");
+    if (published.status !== 201) return c.json(published.body, published.status as 400 | 422);
     await cleanupExpiredDrafts(deps.config);
-
-    const warning = await checkImageUrl(content, deps.config);
-    logEvent("curation.published", { edition: editionId, warnings: validation.warnings.length });
-    const responseBody: Record<string, unknown> = {
-      success: true,
-      edition: editionId,
-      url: `/curacion/${editionId}`,
-      validation,
-    };
-    if (warning) responseBody.warning = warning;
-    return c.json(responseBody, 201);
+    return c.json(published.body, 201);
   });
 
   app.use("/api/drafts", withApiKey(deps, "Draft endpoint disabled: API_KEY not configured"));
@@ -351,7 +374,7 @@ export function registerApiRoutes(app: Hono, deps: AppDeps) {
 
   app.get("/api/drafts/:id", async (c) => {
     const draftId = c.req.param("id");
-    if (!/^[a-f0-9-]{36}$/i.test(draftId)) return c.json({ error: "Invalid draft ID" }, 400);
+    if (!isDraftId(draftId)) return c.json({ error: "Invalid draft ID" }, 400);
 
     const draftPath = join(deps.config.draftsDir, `${draftId}.md`);
     if (!existsSync(draftPath)) return c.json({ error: "Draft not found" }, 404);
@@ -362,32 +385,19 @@ export function registerApiRoutes(app: Hono, deps: AppDeps) {
 
   app.post("/api/drafts/:id/publish", async (c) => {
     const draftId = c.req.param("id");
-    if (!/^[a-f0-9-]{36}$/i.test(draftId)) return c.json({ error: "Invalid draft ID" }, 400);
+    if (!isDraftId(draftId)) return c.json({ error: "Invalid draft ID" }, 400);
 
     const draftPath = join(deps.config.draftsDir, `${draftId}.md`);
     if (!existsSync(draftPath)) return c.json({ error: "Draft not found" }, 404);
 
     const content = await readFile(draftPath, "utf-8");
-    const validation = validateCurationContent(content);
-    if (!validation.valid) return c.json({ error: "Validation failed", validation }, 422);
-
-    const editionId = editionIdFromNow();
-    await mkdir(CURATIONS_DIR, { recursive: true });
-    await writeFile(join(CURATIONS_DIR, `${editionId}.md`), content, "utf-8");
-    invalidateFilesCache();
-    incrementCounter("draftPublishes");
-
-    const warning = await checkImageUrl(content, deps.config);
-    logEvent("draft.published", { draft: draftId, edition: editionId, warnings: validation.warnings.length });
-    const responseBody: Record<string, unknown> = {
-      success: true,
-      draft: draftId,
-      edition: editionId,
-      url: `/curacion/${editionId}`,
-      validation,
-    };
-    if (warning) responseBody.warning = warning;
-    return c.json(responseBody, 201);
+    const published = await publishCurationContent(content, deps, {
+      metric: "draftPublishes",
+      event: "draft.published",
+      extraLog: { draft: draftId },
+      extraResponse: { draft: draftId },
+    });
+    return c.json(published.body, published.status as 201 | 400 | 422);
   });
 
   app.use("/api/curations/:date", async (c, next) => {
@@ -432,7 +442,7 @@ export function registerApiRoutes(app: Hono, deps: AppDeps) {
     const date = c.req.param("date");
     const version = c.req.param("version");
     if (!isCurationFileId(date)) return c.json({ error: "Invalid edition ID format" }, 400);
-    if (!/^[\dTZ-]+-[a-z0-9_-]+$/i.test(version)) return c.json({ error: "Invalid version ID format" }, 400);
+    if (!isVersionId(version)) return c.json({ error: "Invalid version ID format" }, 400);
 
     const filePath = join(deps.config.versionsDir, date, `${version}.md`);
     if (!existsSync(filePath)) return c.json({ error: "Version not found" }, 404);
@@ -494,7 +504,7 @@ export function registerApiRoutes(app: Hono, deps: AppDeps) {
     const previous = await readFile(filePath, "utf-8");
     await saveVersionSnapshot(date, previous, "put", deps);
     await writeFile(filePath, contentOrResponse, "utf-8");
-    invalidateSummaryCache(date);
+    invalidateCurationCache(date);
     incrementCounter("updates");
 
     const warning = await checkImageUrl(contentOrResponse, deps.config);
@@ -534,7 +544,7 @@ export function registerApiRoutes(app: Hono, deps: AppDeps) {
     const updated = serializeFrontmatter(meta, body);
     await saveVersionSnapshot(date, existing, "meta", deps);
     await writeFile(filePath, updated, "utf-8");
-    invalidateSummaryCache(date);
+    invalidateCurationCache(date);
     incrementCounter("updates");
 
     const warning = meta.image_url ? await validateImageUrl(meta.image_url, deps.config) : null;

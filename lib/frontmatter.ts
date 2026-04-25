@@ -73,7 +73,7 @@ export async function validateImageUrl(url: string, config: RuntimeConfig): Prom
 }
 
 export async function checkImageUrl(content: string, config: RuntimeConfig): Promise<string | null> {
-  const match = content.match(/^---\n[\s\S]*?image_url:\s*["']?([^"'\n]+)["']?[\s\S]*?\n---/);
-  if (!match?.[1]) return null;
-  return validateImageUrl(match[1].trim(), config);
+  const { meta } = parseFrontmatter(content);
+  if (!meta.image_url) return null;
+  return validateImageUrl(meta.image_url.trim(), config);
 }

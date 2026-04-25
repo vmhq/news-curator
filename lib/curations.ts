@@ -2,10 +2,14 @@ import { readdir, readFile } from "fs/promises";
 import { existsSync, watch, type FSWatcher } from "fs";
 import { join } from "path";
 import { Resolver } from "node:dns/promises";
+import { escapeHtml } from "./html.ts";
+import { CURATION_FILE_ID_RE, isCurationFileId } from "./ids.ts";
 
 const ssrfResolver = new Resolver();
 ssrfResolver.setServers(["1.1.1.1", "8.8.8.8"]);
 import { marked, Renderer } from "marked";
+
+export { CURATION_FILE_ID_RE, isCurationFileId } from "./ids.ts";
 
 export let CURATIONS_DIR =
   process.env.CURATIONS_DIR ?? "/data/curations";
@@ -38,15 +42,6 @@ export function configureCurationsEnv(config: {
   }
 }
 
-function escapeHtmlInternal(str: string): string {
-  return str
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;")
-    .replace(/'/g, "&#39;");
-}
-
 // Custom renderer: open links in new tab + strip raw HTML to prevent stored XSS
 const renderer = new Renderer();
 renderer.link = function ({ href, text }: { href: string; text: string }) {
@@ -54,12 +49,12 @@ renderer.link = function ({ href, text }: { href: string; text: string }) {
   let safeParsed: URL | null = null;
   try { safeParsed = new URL(href); } catch { /* relative URLs are fine */ }
   if (safeParsed && safeParsed.protocol !== "http:" && safeParsed.protocol !== "https:") {
-    return escapeHtmlInternal(text);
+    return escapeHtml(text);
   }
-  return `<a href="${escapeHtmlInternal(href)}" target="_blank" rel="noopener noreferrer">${text}</a>`;
+  return `<a href="${escapeHtml(href)}" target="_blank" rel="noopener noreferrer">${text}</a>`;
 };
 renderer.html = function ({ text }: { text: string }) {
-  return escapeHtmlInternal(text);
+  return escapeHtml(text);
 };
 marked.use({ renderer });
 
@@ -76,6 +71,11 @@ export function invalidateFilesCache() {
 
 export function invalidateSummaryCache(date: string) {
   summaryCache.delete(date);
+}
+
+export function invalidateCurationCache(date: string) {
+  summaryCache.delete(date);
+  searchIndexCache = null;
 }
 
 export function stopDirWatcher() {
@@ -118,16 +118,11 @@ export function getCacheStats() {
   };
 }
 
-export const CURATION_FILE_ID_RE = /^\d{4}-\d{2}-\d{2}(_\d{2}-\d{2})?$/;
 const CURATION_FILENAME_RE = /^\d{4}-\d{2}-\d{2}(_\d{2}-\d{2})?\.md$/;
 const FEATURED_HEADING_RE = /^## (?:(?:🔥\s*(?:Featured Story:\s*)?)|Noticia principal:\s*)/gim;
 const FEATURED_SECTION_RE =
   /## (?:(?:🔥\s*(?:Featured Story:\s*)?)|Noticia principal:\s*)(.+?)\n\n([\s\S]*?)(?=\n---|\n## (?!\s*(?:(?:🔥\s*(?:Featured Story:\s*)?)|Noticia principal:\s*))|$)/i;
 const FEATURED_HEADING_LABEL_RE = /^(?:🔥(?:\s*Featured Story:)?|Noticia principal:)\s*/i;
-
-export function isCurationFileId(id: string): boolean {
-  return CURATION_FILE_ID_RE.test(id);
-}
 
 export async function getCurationFiles(): Promise<string[]> {
   if (filesCache) return filesCache;
