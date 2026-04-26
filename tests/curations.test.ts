@@ -1,13 +1,11 @@
 import { describe, expect, test } from "bun:test";
 import {
-  extractFeatured,
-  isBlockedResolvedUrl,
-  isBlockedUrl,
-  isCurationFileId,
   renderCurationContent,
-  resolveOgImageCandidate,
-  validateCurationContent,
 } from "../lib/curations.ts";
+import { resolveOgImageCandidate } from "../lib/og-images.ts";
+import { isBlockedResolvedUrl, isBlockedUrl } from "../lib/security.ts";
+import { isCurationFileId } from "../lib/ids.ts";
+import { extractFeatured, validateCurationContent } from "../lib/validation.ts";
 
 const validEdition = `---
 image_url: ""

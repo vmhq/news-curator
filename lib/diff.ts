@@ -54,7 +54,18 @@ function buildLineDiff(before: string, after: string): DiffOp[] {
   return ops;
 }
 
+const MAX_DIFF_LINES = 5_000;
+const MAX_DIFF_CELLS = 1_000_000;
+
 export function renderLineDiff(before: string, after: string): string {
+  const left = before.split("\n");
+  const right = after.split("\n");
+  if (left.length > MAX_DIFF_LINES || right.length > MAX_DIFF_LINES) {
+    return "# Diff omitted: one of the files exceeds the maximum line limit for diff generation.";
+  }
+  if (left.length * right.length > MAX_DIFF_CELLS) {
+    return "# Diff omitted: file size combination exceeds safe computation limits.";
+  }
   return buildLineDiff(before, after)
     .map((op) => {
       if (op.type === "equal") return ` ${op.line}`;

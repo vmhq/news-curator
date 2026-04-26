@@ -1,5 +1,29 @@
 import { join } from "path";
-import { CURATIONS_DIR, SITE_URL } from "./curations.ts";
+
+export let CURATIONS_DIR = process.env.CURATIONS_DIR ?? "/data/curations";
+export let SITE_URL = process.env.SITE_URL ?? "http://localhost:8391";
+export let DEFAULT_COVER = `${SITE_URL}/static/cover.svg`;
+
+export function configureCurationsEnv(config: {
+  curationsDir?: string;
+  siteUrl?: string;
+}): { curationsDirChanged: boolean } {
+  const nextCurationsDir = config.curationsDir?.trim();
+  const nextSiteUrl = config.siteUrl?.trim();
+  let curationsDirChanged = false;
+
+  if (nextCurationsDir && nextCurationsDir !== CURATIONS_DIR) {
+    CURATIONS_DIR = nextCurationsDir;
+    curationsDirChanged = true;
+  }
+
+  if (nextSiteUrl && nextSiteUrl !== SITE_URL) {
+    SITE_URL = nextSiteUrl;
+    DEFAULT_COVER = `${SITE_URL}/static/cover.svg`;
+  }
+
+  return { curationsDirChanged };
+}
 
 export type RateLimitRule = {
   limit: number;

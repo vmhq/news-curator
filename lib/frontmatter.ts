@@ -1,7 +1,7 @@
 import { existsSync } from "fs";
 import { basename, join } from "path";
 import type { RuntimeConfig } from "./config.ts";
-import { isBlockedResolvedUrl } from "./curations.ts";
+import { isBlockedResolvedUrl } from "./security.ts";
 
 export function parseFrontmatter(content: string): { meta: Record<string, string>; body: string } {
   const match = content.match(/^---\n([\s\S]*?)\n---\n([\s\S]*)$/);

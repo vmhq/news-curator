@@ -1,28 +1,34 @@
-import { existsSync } from "fs";
-import { readFile, stat } from "fs/promises";
-import { join } from "path";
 import type { Hono } from "hono";
 import type { AppDeps } from "../lib/app-deps.ts";
 import {
-  CURATIONS_DIR,
-  allEditionsSidebar,
-  dateFromFileId,
-  estimateReadingTime,
-  extractFeatured,
-  extractOgImage,
-  formatDateEs,
   getCachedSummary,
   getCurationFiles,
-  isCurationFileId,
   readCuration,
   renderCurationContent,
-  todayLocal,
-  validateCurationContent,
 } from "../lib/curations.ts";
+import { extractOgImage } from "../lib/og-images.ts";
+import {
+  estimateReadingTime,
+  extractFeatured,
+  validateCurationContent,
+} from "../lib/validation.ts";
+import {
+  allEditionsSidebar,
+  dateFromFileId,
+  formatDateEs,
+  todayLocal,
+} from "../lib/dates.ts";
+import { isCurationFileId } from "../lib/ids.ts";
 import { escapeHtml } from "../lib/html.ts";
 import { isDraftId } from "../lib/ids.ts";
 import { applyCacheHeaders, makeWeakEtag, maybeReturnNotModified } from "../lib/http-cache.ts";
 import { buildPage } from "../templates/layout.ts";
+import {
+  editionExists,
+  statEdition,
+  draftExists,
+  readDraft,
+} from "../lib/storage.ts";
 
 const SIDEBAR_PAGE_SIZE = 8;
 const PREVIEW_BOT_RE =
@@ -72,6 +78,46 @@ function getLatestEditionTarget(files: string[]) {
   return {
     targetDate: files[0] ?? null,
     isToday: false,
+  };
+}
+
+async function buildEditionPageContext(
+  date: string,
+  curation: NonNullable<Awaited<ReturnType<typeof readCuration>>>,
+  files: string[],
+  options: { page?: number; pageSize?: number } = {}
+) {
+  const generatedAt = extractGeneratedAt(curation.raw);
+  const featured = extractFeatured(curation.raw);
+  const readingTime = estimateReadingTime(curation.raw);
+
+  let heroImage: string | null = curation.coverImage;
+  if (!heroImage && featured?.firstUrl) heroImage = await extractOgImage(featured.firstUrl);
+
+  const page = Math.max(1, options.page ?? 1);
+  const pageSize = options.pageSize ?? SIDEBAR_PAGE_SIZE;
+  const sidebarFiles = allEditionsSidebar(files);
+  const sidebarOffset = (page - 1) * pageSize;
+  const recentCurations = await getRecentCurations(
+    sidebarFiles.slice(sidebarOffset, sidebarOffset + pageSize),
+    pageSize
+  );
+
+  const idx = files.indexOf(date);
+  const nextDate = idx > 0 ? files[idx - 1] : null;
+  const prevDate = idx >= 0 && idx < files.length - 1 ? files[idx + 1] : null;
+
+  return {
+    generatedAt,
+    featured,
+    readingTime,
+    heroImage,
+    recentCurations,
+    prevDate,
+    nextDate,
+    sidebarHasMore: sidebarOffset + pageSize < sidebarFiles.length,
+    sidebarHasPrev: page > 1,
+    sidebarPage: page,
   };
 }
 
@@ -141,40 +187,15 @@ export function registerPublicRoutes(app: Hono, deps: AppDeps) {
       return response;
     }
 
-    const generatedAt = extractGeneratedAt(curation.raw);
-    const featured = extractFeatured(curation.raw);
-    const readingTime = estimateReadingTime(curation.raw);
-
-    let heroImage: string | null = curation.coverImage;
-    if (!heroImage && featured?.firstUrl) heroImage = await extractOgImage(featured.firstUrl);
-
     const page = Math.max(1, Number.parseInt(c.req.query("p") || "1", 10) || 1);
-    const sidebarFiles = allEditionsSidebar(files);
-    const sidebarOffset = (page - 1) * SIDEBAR_PAGE_SIZE;
-    const recentCurations = await getRecentCurations(
-      sidebarFiles.slice(sidebarOffset, sidebarOffset + SIDEBAR_PAGE_SIZE),
-      SIDEBAR_PAGE_SIZE
-    );
-
-    const idx = files.indexOf(targetDate);
-    const nextDate = idx > 0 ? files[idx - 1] : null;
-    const prevDate = idx >= 0 && idx < files.length - 1 ? files[idx + 1] : null;
+    const ctx = await buildEditionPageContext(targetDate, curation, files, { page, pageSize: SIDEBAR_PAGE_SIZE });
 
     const response = c.html(
       buildPage(`Daily Brief — ${formatDateEs(targetDate)}`, curation.html, {
         date: targetDate,
         isToday,
-        generatedAt,
-        recentCurations,
-        prevDate,
-        nextDate,
-        featured,
-        heroImage,
         canonicalPath: isToday ? "/" : `/curacion/${targetDate}`,
-        sidebarHasMore: sidebarOffset + SIDEBAR_PAGE_SIZE < sidebarFiles.length,
-        sidebarHasPrev: page > 1,
-        sidebarPage: page,
-        readingTime,
+        ...ctx,
       })
     );
     response.headers.set("Cache-Control", "no-store");
@@ -185,9 +206,8 @@ export function registerPublicRoutes(app: Hono, deps: AppDeps) {
     const date = c.req.param("date");
     if (!isCurationFileId(date)) return c.text("Fecha invalida", 400);
 
-    const filePath = join(CURATIONS_DIR, `${date}.md`);
-    if (existsSync(filePath)) {
-      const info = await stat(filePath);
+    if (editionExists(date)) {
+      const info = await statEdition(date);
       const etag = makeWeakEtag(date, info.size, info.mtimeMs);
       const notModified = maybeReturnNotModified(c, {
         etag,
@@ -218,38 +238,22 @@ export function registerPublicRoutes(app: Hono, deps: AppDeps) {
       );
     }
 
-    const generatedAt = extractGeneratedAt(curation.raw);
-    const featured = extractFeatured(curation.raw);
-    const readingTime = estimateReadingTime(curation.raw);
-
-    let heroImage: string | null = curation.coverImage;
-    if (!heroImage && featured?.firstUrl) heroImage = await extractOgImage(featured.firstUrl);
-
-    const recentCurations = await getRecentCurations(allEditionsSidebar(files), SIDEBAR_PAGE_SIZE);
-    const idx = files.indexOf(date);
-    const nextDate = idx > 0 ? files[idx - 1] : null;
-    const prevDate = idx >= 0 && idx < files.length - 1 ? files[idx + 1] : null;
+    const ctx = await buildEditionPageContext(date, curation, files);
 
     const response = c.html(
       buildPage(`Daily Brief — ${formatDateEs(date)}`, curation.html, {
         date,
         isToday: dateFromFileId(date) === todayLocal(),
-        generatedAt,
-        recentCurations,
-        prevDate,
-        nextDate,
-        featured,
-        heroImage,
         canonicalPath: `/curacion/${date}`,
         sidebarHasMore: allEditionsSidebar(files).length > SIDEBAR_PAGE_SIZE,
         sidebarHasPrev: false,
         sidebarPage: 1,
-        readingTime,
+        ...ctx,
       })
     );
 
-    if (existsSync(filePath)) {
-      const info = await stat(filePath);
+    if (editionExists(date)) {
+      const info = await statEdition(date);
       applyCacheHeaders(response.headers, {
         etag: makeWeakEtag(date, info.size, info.mtimeMs),
         lastModified: info.mtime,
@@ -304,10 +308,11 @@ export function registerPublicRoutes(app: Hono, deps: AppDeps) {
     const draftId = c.req.param("id");
     if (!isDraftId(draftId)) return c.text("Draft invalido", 400);
 
-    const draftPath = join(deps.config.draftsDir, `${draftId}.md`);
-    if (!existsSync(draftPath)) return c.text("Draft no encontrado", 404);
+    if (!draftExists(deps.config.draftsDir, draftId)) return c.text("Draft no encontrado", 404);
 
-    const content = await readFile(draftPath, "utf-8");
+    const content = await readDraft(deps.config.draftsDir, draftId);
+    if (!content) return c.text("Draft no encontrado", 404);
+
     const rendered = await renderCurationContent(content);
     const validation = validateCurationContent(content);
     const featured = extractFeatured(content);

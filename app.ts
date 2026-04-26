@@ -7,7 +7,8 @@ import type { RuntimeConfigInput } from "./lib/config.ts";
 import { createApiKeyGuard } from "./lib/auth.ts";
 import { type AppDeps } from "./lib/app-deps.ts";
 import { loadRuntimeConfig } from "./lib/config.ts";
-import { configureCurationsEnv, getCacheStats, getCurationFiles, startDirWatcher, stopDirWatcher } from "./lib/curations.ts";
+import { configureCurationsEnv } from "./lib/config.ts";
+import { getCacheStats, getCurationFiles, invalidateFilesCache, startDirWatcher, stopDirWatcher } from "./lib/curations.ts";
 import { logEvent } from "./lib/logging.ts";
 import { getMetricsSnapshot, recordRequest } from "./lib/observability.ts";
 import { InMemoryRateLimiter } from "./lib/rate-limit.ts";
@@ -17,7 +18,10 @@ import { registerPublicRoutes } from "./routes/public.ts";
 
 export function createApp(overrides: RuntimeConfigInput = {}) {
   const config = loadRuntimeConfig(overrides);
-  configureCurationsEnv({ curationsDir: config.curationsDir, siteUrl: config.siteUrl });
+  const { curationsDirChanged } = configureCurationsEnv({ curationsDir: config.curationsDir, siteUrl: config.siteUrl });
+  if (curationsDirChanged) {
+    invalidateFilesCache();
+  }
 
   if (config.enableWatcher) {
     startDirWatcher();

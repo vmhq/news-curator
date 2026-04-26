@@ -1,4 +1,5 @@
-import { SITE_URL, DEFAULT_COVER, formatDateEs, dateFromFileId } from "../lib/curations.ts";
+import { SITE_URL, DEFAULT_COVER } from "../lib/config.ts";
+import { formatDateEs, dateFromFileId } from "../lib/dates.ts";
 import { escapeHtml } from "../lib/html.ts";
 
 export { escapeHtml } from "../lib/html.ts";

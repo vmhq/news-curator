@@ -1,21 +1,20 @@
-import { existsSync } from "fs";
-import { mkdir, readFile, readdir, stat, writeFile } from "fs/promises";
-import { basename, join } from "path";
+import { basename } from "path";
 import type { Context, Hono, Next } from "hono";
 import type { AppDeps } from "../lib/app-deps.ts";
 import { renderLineDiff } from "../lib/diff.ts";
 import { checkImageUrl, parseFrontmatter, serializeFrontmatter, validateImageUrl } from "../lib/frontmatter.ts";
 import {
-  CURATIONS_DIR,
   getCachedSummary,
   getCurationFiles,
   invalidateCurationCache,
   invalidateFilesCache,
-  isCurationFileId,
   searchCurations,
+} from "../lib/curations.ts";
+import {
   type CurationValidationResult,
   validateCurationContent,
-} from "../lib/curations.ts";
+} from "../lib/validation.ts";
+import { isCurationFileId } from "../lib/ids.ts";
 import { escapeHtml } from "../lib/html.ts";
 import { applyCacheHeaders, makeWeakEtag, maybeReturnNotModified } from "../lib/http-cache.ts";
 import { isDraftId, isVersionId } from "../lib/ids.ts";
@@ -23,6 +22,21 @@ import { logEvent } from "../lib/logging.ts";
 import { incrementCounter } from "../lib/observability.ts";
 import { getRequestIp } from "../lib/rate-limit.ts";
 import { cleanupExpiredDrafts, trimVersionHistory } from "../lib/retention.ts";
+import {
+  editionExists,
+  editionFilePath,
+  readEdition,
+  statEdition,
+  writeEdition,
+  draftExists,
+  readDraft,
+  writeDraft,
+  listDrafts,
+  writeVersion,
+  listVersions,
+  readVersion,
+  writeUpload,
+} from "../lib/storage.ts";
 
 function editionIdFromNow(): string {
   const now = new Date();
@@ -55,10 +69,8 @@ async function readRequestContent(c: Context): Promise<string | Response> {
 
 async function saveVersionSnapshot(date: string, content: string, reason: string, deps: AppDeps) {
   const safeReason = reason.replace(/[^a-z0-9_-]/gi, "").slice(0, 32) || "edit";
-  const dir = join(deps.config.versionsDir, date);
-  await mkdir(dir, { recursive: true });
   const filename = `${versionTimestamp()}-${safeReason}.md`;
-  await writeFile(join(dir, filename), content, "utf-8");
+  await writeVersion(deps.config.versionsDir, date, filename, content);
   await trimVersionHistory(date, deps.config);
   logEvent("curation.version_saved", { edition: date, version: filename, reason: safeReason });
 }
@@ -83,8 +95,7 @@ async function publishCurationContent(
   }
 
   const editionId = editionIdFromNow();
-  await mkdir(CURATIONS_DIR, { recursive: true });
-  await writeFile(join(CURATIONS_DIR, `${editionId}.md`), content, "utf-8");
+  await writeEdition(editionId, content);
   invalidateFilesCache();
   incrementCounter(options.metric);
 
@@ -186,10 +197,9 @@ export function registerApiRoutes(app: Hono, deps: AppDeps) {
     const date = c.req.param("date");
     if (!isCurationFileId(date)) return c.json({ error: "Invalid edition ID format" }, 400);
 
-    const filePath = join(CURATIONS_DIR, `${date}.md`);
-    if (!existsSync(filePath)) return c.json({ error: "Edition not found" }, 404);
+    if (!editionExists(date)) return c.json({ error: "Edition not found" }, 404);
 
-    const info = await stat(filePath);
+    const info = await statEdition(date);
     const etag = makeWeakEtag(date, info.size, info.mtimeMs);
     const notModified = maybeReturnNotModified(c, {
       etag,
@@ -198,7 +208,7 @@ export function registerApiRoutes(app: Hono, deps: AppDeps) {
     });
     if (notModified) return notModified;
 
-    const content = await readFile(filePath, "utf-8");
+    const content = await readEdition(date);
     const response = c.json({ edition: date, content });
     applyCacheHeaders(response.headers, {
       etag,
@@ -250,8 +260,7 @@ export function registerApiRoutes(app: Hono, deps: AppDeps) {
     const ext = deps.config.imageExt[file.type];
     const filename = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}.${ext}`;
 
-    await mkdir(deps.config.uploadsDir, { recursive: true });
-    await writeFile(join(deps.config.uploadsDir, filename), Buffer.from(await file.arrayBuffer()));
+    await writeUpload(deps.config.uploadsDir, filename, Buffer.from(await file.arrayBuffer()));
     incrementCounter("uploads");
 
     return c.json({ success: true, url: `/static/uploads/${filename}` }, 201);
@@ -281,9 +290,10 @@ export function registerApiRoutes(app: Hono, deps: AppDeps) {
       if (typeof body.draft_id === "string") {
         const draftId = body.draft_id;
         if (!isDraftId(draftId)) return c.json({ error: "Invalid draft_id" }, 400);
-        const draftPath = join(deps.config.draftsDir, `${draftId}.md`);
-        if (!existsSync(draftPath)) return c.json({ error: "Draft not found" }, 404);
-        content = await readFile(draftPath, "utf-8");
+        if (!draftExists(deps.config.draftsDir, draftId)) return c.json({ error: "Draft not found" }, 404);
+        const draftContent = await readDraft(deps.config.draftsDir, draftId);
+        if (!draftContent) return c.json({ error: "Draft not found" }, 404);
+        content = draftContent;
       } else if (typeof body.content === "string") {
         content = body.content;
       } else {
@@ -308,34 +318,25 @@ export function registerApiRoutes(app: Hono, deps: AppDeps) {
     return c.json(published.body, 201);
   });
 
-  app.use("/api/drafts", withApiKey(deps, "Draft endpoint disabled: API_KEY not configured"));
-  app.use("/api/drafts", limitDrafts);
-  app.use("/api/drafts/*", withApiKey(deps, "Draft endpoint disabled: API_KEY not configured"));
-  app.use("/api/drafts/*", limitDrafts);
+  const draftAuth = withApiKey(deps, "Draft endpoint disabled: API_KEY not configured");
+  app.use("/api/drafts", draftAuth, limitDrafts);
+  app.use("/api/drafts/*", draftAuth, limitDrafts);
 
   app.get("/api/drafts/recent", async (c) => {
-    if (!existsSync(deps.config.draftsDir)) return c.json({ draft: null });
+    const drafts = await listDrafts(deps.config.draftsDir);
+    if (drafts.length === 0) return c.json({ draft: null });
 
-    const files = (await readdir(deps.config.draftsDir)).filter((file) => file.endsWith(".md"));
-    if (files.length === 0) return c.json({ draft: null });
-
-    const sorted = await Promise.all(
-      files.map(async (file) => ({
-        file,
-        info: await stat(join(deps.config.draftsDir, file)),
-      }))
-    );
-    sorted.sort((left, right) => right.info.mtimeMs - left.info.mtimeMs);
-
-    const latest = sorted[0];
+    drafts.sort((left, right) => right.mtimeMs - left.mtimeMs);
+    const latest = drafts[0];
     if (!latest) return c.json({ draft: null });
 
     const draftId = latest.file.replace(/\.md$/, "");
-    const content = await readFile(join(deps.config.draftsDir, latest.file), "utf-8");
+    const content = await readDraft(deps.config.draftsDir, draftId);
+    if (!content) return c.json({ draft: null });
     return c.json({
       draft: draftId,
       previewUrl: `/drafts/${draftId}`,
-      updatedAt: latest.info.mtime.toISOString(),
+      updatedAt: new Date(latest.mtimeMs).toISOString(),
       validation: validateCurationContent(content),
     });
   });
@@ -354,8 +355,7 @@ export function registerApiRoutes(app: Hono, deps: AppDeps) {
     }
 
     const draftId = crypto.randomUUID();
-    await mkdir(deps.config.draftsDir, { recursive: true });
-    await writeFile(join(deps.config.draftsDir, `${draftId}.md`), contentOrResponse, "utf-8");
+    await writeDraft(deps.config.draftsDir, draftId, contentOrResponse);
     incrementCounter("draftCreates");
     await cleanupExpiredDrafts(deps.config);
 
@@ -376,10 +376,10 @@ export function registerApiRoutes(app: Hono, deps: AppDeps) {
     const draftId = c.req.param("id");
     if (!isDraftId(draftId)) return c.json({ error: "Invalid draft ID" }, 400);
 
-    const draftPath = join(deps.config.draftsDir, `${draftId}.md`);
-    if (!existsSync(draftPath)) return c.json({ error: "Draft not found" }, 404);
+    if (!draftExists(deps.config.draftsDir, draftId)) return c.json({ error: "Draft not found" }, 404);
 
-    const content = await readFile(draftPath, "utf-8");
+    const content = await readDraft(deps.config.draftsDir, draftId);
+    if (!content) return c.json({ error: "Draft not found" }, 404);
     return c.json({ draft: draftId, content, validation: validateCurationContent(content) });
   });
 
@@ -387,10 +387,10 @@ export function registerApiRoutes(app: Hono, deps: AppDeps) {
     const draftId = c.req.param("id");
     if (!isDraftId(draftId)) return c.json({ error: "Invalid draft ID" }, 400);
 
-    const draftPath = join(deps.config.draftsDir, `${draftId}.md`);
-    if (!existsSync(draftPath)) return c.json({ error: "Draft not found" }, 404);
+    if (!draftExists(deps.config.draftsDir, draftId)) return c.json({ error: "Draft not found" }, 404);
 
-    const content = await readFile(draftPath, "utf-8");
+    const content = await readDraft(deps.config.draftsDir, draftId);
+    if (!content) return c.json({ error: "Draft not found" }, 404);
     const published = await publishCurationContent(content, deps, {
       metric: "draftPublishes",
       event: "draft.published",
@@ -422,18 +422,12 @@ export function registerApiRoutes(app: Hono, deps: AppDeps) {
     const date = c.req.param("date");
     if (!isCurationFileId(date)) return c.json({ error: "Invalid edition ID format" }, 400);
 
-    const versionDir = join(deps.config.versionsDir, date);
-    if (!existsSync(versionDir)) return c.json({ edition: date, versions: [] });
-
-    const versions = (await readdir(versionDir))
-      .filter((file) => file.endsWith(".md"))
-      .sort()
-      .reverse()
-      .map((file) => ({
-        id: file.replace(/\.md$/, ""),
-        file,
-        path: `/api/curations/${date}/versions/${file.replace(/\.md$/, "")}`,
-      }));
+    const versionFiles = await listVersions(deps.config.versionsDir, date);
+    const versions = versionFiles.map((file) => ({
+      id: file.replace(/\.md$/, ""),
+      file,
+      path: `/api/curations/${date}/versions/${file.replace(/\.md$/, "")}`,
+    }));
 
     return c.json({ edition: date, versions });
   });
@@ -444,10 +438,8 @@ export function registerApiRoutes(app: Hono, deps: AppDeps) {
     if (!isCurationFileId(date)) return c.json({ error: "Invalid edition ID format" }, 400);
     if (!isVersionId(version)) return c.json({ error: "Invalid version ID format" }, 400);
 
-    const filePath = join(deps.config.versionsDir, date, `${version}.md`);
-    if (!existsSync(filePath)) return c.json({ error: "Version not found" }, 404);
-
-    const content = await readFile(filePath, "utf-8");
+    const content = await readVersion(deps.config.versionsDir, date, version);
+    if (!content) return c.json({ error: "Version not found" }, 404);
     return c.json({ edition: date, version, content });
   });
 
@@ -455,21 +447,16 @@ export function registerApiRoutes(app: Hono, deps: AppDeps) {
     const date = c.req.param("date");
     if (!isCurationFileId(date)) return c.json({ error: "Invalid edition ID format" }, 400);
 
-    const currentPath = join(CURATIONS_DIR, `${date}.md`);
-    const versionDir = join(deps.config.versionsDir, date);
-    if (!existsSync(currentPath)) return c.json({ error: "Edition not found" }, 404);
-    if (!existsSync(versionDir)) return c.json({ error: "No versions found" }, 404);
+    if (!editionExists(date)) return c.json({ error: "Edition not found" }, 404);
+    const versionFiles = await listVersions(deps.config.versionsDir, date);
+    if (versionFiles.length === 0) return c.json({ error: "No versions found" }, 404);
 
-    const latestVersionFile = (await readdir(versionDir))
-      .filter((file) => file.endsWith(".md"))
-      .sort()
-      .reverse()[0];
+    const latestVersionFile = versionFiles[0];
     if (!latestVersionFile) return c.json({ error: "No versions found" }, 404);
 
-    const [current, previous] = await Promise.all([
-      readFile(currentPath, "utf-8"),
-      readFile(join(versionDir, latestVersionFile), "utf-8"),
-    ]);
+    const current = await readEdition(date);
+    const previous = await readVersion(deps.config.versionsDir, date, latestVersionFile.replace(/\.md$/, ""));
+    if (!current || !previous) return c.json({ error: "Version not found" }, 404);
 
     return c.json({
       edition: date,
@@ -482,8 +469,7 @@ export function registerApiRoutes(app: Hono, deps: AppDeps) {
     const date = c.req.param("date");
     if (!isCurationFileId(date)) return c.json({ error: "Invalid edition ID format" }, 400);
 
-    const filePath = join(CURATIONS_DIR, `${date}.md`);
-    if (!existsSync(filePath)) return c.json({ error: "Edition not found" }, 404);
+    if (!editionExists(date)) return c.json({ error: "Edition not found" }, 404);
 
     const contentOrResponse = await readRequestContent(c);
     if (contentOrResponse instanceof Response) return contentOrResponse;
@@ -501,9 +487,10 @@ export function registerApiRoutes(app: Hono, deps: AppDeps) {
       return c.json({ error: "Validation failed", validation }, 422);
     }
 
-    const previous = await readFile(filePath, "utf-8");
+    const previous = await readEdition(date);
+    if (!previous) return c.json({ error: "Edition not found" }, 404);
     await saveVersionSnapshot(date, previous, "put", deps);
-    await writeFile(filePath, contentOrResponse, "utf-8");
+    await writeEdition(date, contentOrResponse);
     invalidateCurationCache(date);
     incrementCounter("updates");
 
@@ -523,15 +510,15 @@ export function registerApiRoutes(app: Hono, deps: AppDeps) {
     const date = c.req.param("date");
     if (!isCurationFileId(date)) return c.json({ error: "Invalid edition ID format" }, 400);
 
-    const filePath = join(CURATIONS_DIR, `${date}.md`);
-    if (!existsSync(filePath)) return c.json({ error: "Edition not found" }, 404);
+    if (!editionExists(date)) return c.json({ error: "Edition not found" }, 404);
 
     const patch = (await c.req.json()) as Record<string, string | null>;
     if (typeof patch !== "object" || Array.isArray(patch)) {
       return c.json({ error: "Body must be a JSON object of frontmatter fields" }, 400);
     }
 
-    const existing = await readFile(filePath, "utf-8");
+    const existing = await readEdition(date);
+    if (!existing) return c.json({ error: "Edition not found" }, 404);
     const { meta, body } = parseFrontmatter(existing);
     for (const [key, value] of Object.entries(patch)) {
       if (value === null || value === "") {
@@ -543,7 +530,7 @@ export function registerApiRoutes(app: Hono, deps: AppDeps) {
 
     const updated = serializeFrontmatter(meta, body);
     await saveVersionSnapshot(date, existing, "meta", deps);
-    await writeFile(filePath, updated, "utf-8");
+    await writeEdition(date, updated);
     invalidateCurationCache(date);
     incrementCounter("updates");
 
