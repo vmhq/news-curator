@@ -4,29 +4,29 @@ import { join } from "path";
 import { CURATIONS_DIR } from "./config.ts";
 
 // Editions
-export function editionFilePath(date: string): string {
-  return join(CURATIONS_DIR, `${date}.md`);
+export function editionFilePath(date: string, curationsDir = CURATIONS_DIR): string {
+  return join(curationsDir, `${date}.md`);
 }
 
-export function editionExists(date: string): boolean {
-  return existsSync(editionFilePath(date));
+export function editionExists(date: string, curationsDir = CURATIONS_DIR): boolean {
+  return existsSync(editionFilePath(date, curationsDir));
 }
 
-export async function readEdition(date: string): Promise<string | null> {
+export async function readEdition(date: string, curationsDir = CURATIONS_DIR): Promise<string | null> {
   try {
-    return await readFile(editionFilePath(date), "utf-8");
+    return await readFile(editionFilePath(date, curationsDir), "utf-8");
   } catch {
     return null;
   }
 }
 
-export async function writeEdition(date: string, content: string): Promise<void> {
-  await mkdir(CURATIONS_DIR, { recursive: true });
-  await writeFile(editionFilePath(date), content, "utf-8");
+export async function writeEdition(date: string, content: string, curationsDir = CURATIONS_DIR): Promise<void> {
+  await mkdir(curationsDir, { recursive: true });
+  await writeFile(editionFilePath(date, curationsDir), content, "utf-8");
 }
 
-export async function statEdition(date: string) {
-  return stat(editionFilePath(date));
+export async function statEdition(date: string, curationsDir = CURATIONS_DIR) {
+  return stat(editionFilePath(date, curationsDir));
 }
 
 // Drafts

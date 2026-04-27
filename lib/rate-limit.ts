@@ -17,7 +17,6 @@ export class InMemoryRateLimiter {
     const entry = this.buckets.get(compositeKey);
 
     if (!entry || now > entry.resetAt) {
-      this.evictExpired(now);
       if (this.buckets.size >= this.maxEntries) {
         const oldestKey = this.buckets.keys().next().value;
         if (oldestKey !== undefined) this.buckets.delete(oldestKey);
@@ -38,11 +37,7 @@ export class InMemoryRateLimiter {
     return { trackedBuckets: this.buckets.size };
   }
 
-  private evictExpired(now: number) {
-    for (const [key, entry] of this.buckets) {
-      if (now > entry.resetAt) this.buckets.delete(key);
-    }
-  }
+
 }
 
 export function getRequestIp(c: Context): string {

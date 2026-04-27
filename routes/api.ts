@@ -8,6 +8,7 @@ import {
   getCurationFiles,
   invalidateCurationCache,
   invalidateFilesCache,
+  invalidateRenderCache,
   searchCurations,
 } from "../lib/curations.ts";
 import {
@@ -95,7 +96,7 @@ async function publishCurationContent(
   }
 
   const editionId = editionIdFromNow();
-  await writeEdition(editionId, content);
+  await writeEdition(editionId, content, deps.config.curationsDir);
   invalidateFilesCache();
   incrementCounter(options.metric);
 
@@ -197,9 +198,9 @@ export function registerApiRoutes(app: Hono, deps: AppDeps) {
     const date = c.req.param("date");
     if (!isCurationFileId(date)) return c.json({ error: "Invalid edition ID format" }, 400);
 
-    if (!editionExists(date)) return c.json({ error: "Edition not found" }, 404);
+    if (!editionExists(date, deps.config.curationsDir)) return c.json({ error: "Edition not found" }, 404);
 
-    const info = await statEdition(date);
+    const info = await statEdition(date, deps.config.curationsDir);
     const etag = makeWeakEtag(date, info.size, info.mtimeMs);
     const notModified = maybeReturnNotModified(c, {
       etag,
@@ -208,7 +209,7 @@ export function registerApiRoutes(app: Hono, deps: AppDeps) {
     });
     if (notModified) return notModified;
 
-    const content = await readEdition(date);
+    const content = await readEdition(date, deps.config.curationsDir);
     const response = c.json({ edition: date, content });
     applyCacheHeaders(response.headers, {
       etag,
@@ -447,14 +448,14 @@ export function registerApiRoutes(app: Hono, deps: AppDeps) {
     const date = c.req.param("date");
     if (!isCurationFileId(date)) return c.json({ error: "Invalid edition ID format" }, 400);
 
-    if (!editionExists(date)) return c.json({ error: "Edition not found" }, 404);
+    if (!editionExists(date, deps.config.curationsDir)) return c.json({ error: "Edition not found" }, 404);
     const versionFiles = await listVersions(deps.config.versionsDir, date);
     if (versionFiles.length === 0) return c.json({ error: "No versions found" }, 404);
 
     const latestVersionFile = versionFiles[0];
     if (!latestVersionFile) return c.json({ error: "No versions found" }, 404);
 
-    const current = await readEdition(date);
+    const current = await readEdition(date, deps.config.curationsDir);
     const previous = await readVersion(deps.config.versionsDir, date, latestVersionFile.replace(/\.md$/, ""));
     if (!current || !previous) return c.json({ error: "Version not found" }, 404);
 
@@ -469,7 +470,7 @@ export function registerApiRoutes(app: Hono, deps: AppDeps) {
     const date = c.req.param("date");
     if (!isCurationFileId(date)) return c.json({ error: "Invalid edition ID format" }, 400);
 
-    if (!editionExists(date)) return c.json({ error: "Edition not found" }, 404);
+    if (!editionExists(date, deps.config.curationsDir)) return c.json({ error: "Edition not found" }, 404);
 
     const contentOrResponse = await readRequestContent(c);
     if (contentOrResponse instanceof Response) return contentOrResponse;
@@ -487,11 +488,12 @@ export function registerApiRoutes(app: Hono, deps: AppDeps) {
       return c.json({ error: "Validation failed", validation }, 422);
     }
 
-    const previous = await readEdition(date);
+    const previous = await readEdition(date, deps.config.curationsDir);
     if (!previous) return c.json({ error: "Edition not found" }, 404);
     await saveVersionSnapshot(date, previous, "put", deps);
-    await writeEdition(date, contentOrResponse);
+    await writeEdition(date, contentOrResponse, deps.config.curationsDir);
     invalidateCurationCache(date);
+    invalidateRenderCache(date);
     incrementCounter("updates");
 
     const warning = await checkImageUrl(contentOrResponse, deps.config);
@@ -510,14 +512,14 @@ export function registerApiRoutes(app: Hono, deps: AppDeps) {
     const date = c.req.param("date");
     if (!isCurationFileId(date)) return c.json({ error: "Invalid edition ID format" }, 400);
 
-    if (!editionExists(date)) return c.json({ error: "Edition not found" }, 404);
+    if (!editionExists(date, deps.config.curationsDir)) return c.json({ error: "Edition not found" }, 404);
 
     const patch = (await c.req.json()) as Record<string, string | null>;
     if (typeof patch !== "object" || Array.isArray(patch)) {
       return c.json({ error: "Body must be a JSON object of frontmatter fields" }, 400);
     }
 
-    const existing = await readEdition(date);
+    const existing = await readEdition(date, deps.config.curationsDir);
     if (!existing) return c.json({ error: "Edition not found" }, 404);
     const { meta, body } = parseFrontmatter(existing);
     for (const [key, value] of Object.entries(patch)) {
@@ -530,8 +532,9 @@ export function registerApiRoutes(app: Hono, deps: AppDeps) {
 
     const updated = serializeFrontmatter(meta, body);
     await saveVersionSnapshot(date, existing, "meta", deps);
-    await writeEdition(date, updated);
+    await writeEdition(date, updated, deps.config.curationsDir);
     invalidateCurationCache(date);
+    invalidateRenderCache(date);
     incrementCounter("updates");
 
     const warning = meta.image_url ? await validateImageUrl(meta.image_url, deps.config) : null;

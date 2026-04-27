@@ -1,4 +1,3 @@
-import { SITE_URL, DEFAULT_COVER } from "../lib/config.ts";
 import { formatDateEs, dateFromFileId } from "../lib/dates.ts";
 import { escapeHtml } from "../lib/html.ts";
 
@@ -58,28 +57,7 @@ function heroArtSvg(): string {
   </svg>`;
 }
 
-/** Extract story items from rendered HTML body for the feed view */
-function buildFeedItems(body: string): Array<{ section: string; headline: string; excerpt: string; href: string }> {
-  const items: Array<{ section: string; headline: string; excerpt: string; href: string }> = [];
-  let currentSection = "";
-  const chunks = body.split(/(?=<h[23][\s>])/i);
-  for (const chunk of chunks) {
-    const h2Match = chunk.match(/^<h2[^>]*>([\s\S]*?)<\/h2>/i);
-    const h3Match = chunk.match(/^<h3[^>]*>([\s\S]*?)<\/h3>/i);
-    if (h2Match?.[1]) {
-      currentSection = h2Match[1].replace(/<[^>]+>/g, "").trim();
-    } else if (h3Match?.[1] && currentSection) {
-      const headlineHtml = h3Match[1];
-      const headline = headlineHtml.replace(/<[^>]+>/g, "").trim();
-      const hrefMatch = headlineHtml.match(/href="([^"]+)"/);
-      const href = hrefMatch?.[1] ?? "#article-body";
-      const pMatch = chunk.match(/<\/h3>[\s\S]*?<p[^>]*>([\s\S]*?)<\/p>/i);
-      const excerpt = pMatch?.[1] ? pMatch[1].replace(/<[^>]+>/g, "").trim() : "";
-      if (headline) items.push({ section: currentSection, headline, excerpt, href });
-    }
-  }
-  return items;
-}
+
 
 export function buildPage(
   title: string,
@@ -99,6 +77,8 @@ export function buildPage(
     sidebarPage?: number;
     hideSidebar?: boolean;
     readingTime?: number;
+    feedItems?: Array<{ section: string; headline: string; excerpt: string; href: string }>;
+    siteUrl?: string;
   } = {}
 ): string {
   const {
@@ -107,12 +87,14 @@ export function buildPage(
     canonicalPath = "/",
     sidebarHasMore = false, sidebarHasPrev = false, sidebarPage = 1,
     hideSidebar = false, readingTime,
+    feedItems: metaFeedItems = [],
+    siteUrl = "http://localhost:8391",
   } = meta;
 
-  const canonicalUrl = `${SITE_URL}${canonicalPath}`;
+  const canonicalUrl = `${siteUrl}${canonicalPath}`;
   const ogDescription =
     featured?.body ?? "Noticias de tecnología e inteligencia artificial curadas diariamente por IA.";
-  const ogImage = heroImage ?? DEFAULT_COVER;
+  const ogImage = heroImage ?? `${siteUrl}/static/cover.svg`;
 
   const isArchive = canonicalPath === "/ediciones";
   const isHomeOrEdition = !isArchive;
@@ -248,8 +230,8 @@ export function buildPage(
     ? `EDICIÓN · ${escapeHtml(formatDateShort(date))}${generatedAt ? ` · ACTUALIZADA ${escapeHtml(generatedAt)}` : ""}`
     : "DAILY BRIEF";
 
-  // Feed layout — featured story as #1, then extracted body items
-  const feedItems = isHomeOrEdition && featured ? buildFeedItems(body) : [];
+  // Feed layout — featured story as #1, then precalculated body items
+  const feedItems = isHomeOrEdition && featured ? metaFeedItems : [];
   const totalFeedItems = featured ? feedItems.length + 1 : feedItems.length;
 
   const featuredFeedItem = featured

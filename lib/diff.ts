@@ -6,16 +6,18 @@ type DiffOp =
 function buildLineDiff(before: string, after: string): DiffOp[] {
   const left = before.split("\n");
   const right = after.split("\n");
-  const dp = Array.from({ length: left.length + 1 }, () =>
-    Array<number>(right.length + 1).fill(0)
-  );
+  const n = left.length;
+  const m = right.length;
+  const cols = m + 1;
+  const dp = new Uint32Array((n + 1) * cols);
 
-  for (let i = left.length - 1; i >= 0; i--) {
-    for (let j = right.length - 1; j >= 0; j--) {
+  for (let i = n - 1; i >= 0; i--) {
+    for (let j = m - 1; j >= 0; j--) {
+      const idx = i * cols + j;
       if (left[i] === right[j]) {
-        dp[i]![j] = (dp[i + 1]![j + 1] ?? 0) + 1;
+        dp[idx] = dp[(i + 1) * cols + (j + 1)] + 1;
       } else {
-        dp[i]![j] = Math.max(dp[i + 1]![j] ?? 0, dp[i]![j + 1] ?? 0);
+        dp[idx] = Math.max(dp[(i + 1) * cols + j], dp[idx + 1]);
       }
     }
   }
@@ -24,7 +26,8 @@ function buildLineDiff(before: string, after: string): DiffOp[] {
   let i = 0;
   let j = 0;
 
-  while (i < left.length && j < right.length) {
+  while (i < n && j < m) {
+    const idx = i * cols + j;
     if (left[i] === right[j]) {
       ops.push({ type: "equal", line: left[i] ?? "" });
       i++;
@@ -32,7 +35,7 @@ function buildLineDiff(before: string, after: string): DiffOp[] {
       continue;
     }
 
-    if ((dp[i + 1]![j] ?? 0) >= (dp[i]![j + 1] ?? 0)) {
+    if (dp[(i + 1) * cols + j] >= dp[idx + 1]) {
       ops.push({ type: "remove", line: left[i] ?? "" });
       i++;
     } else {
@@ -41,12 +44,12 @@ function buildLineDiff(before: string, after: string): DiffOp[] {
     }
   }
 
-  while (i < left.length) {
+  while (i < n) {
     ops.push({ type: "remove", line: left[i] ?? "" });
     i++;
   }
 
-  while (j < right.length) {
+  while (j < m) {
     ops.push({ type: "add", line: right[j] ?? "" });
     j++;
   }

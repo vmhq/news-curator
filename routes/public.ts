@@ -3,7 +3,7 @@ import type { AppDeps } from "../lib/app-deps.ts";
 import {
   getCachedSummary,
   getCurationFiles,
-  readCuration,
+  getRenderedCuration,
   renderCurationContent,
 } from "../lib/curations.ts";
 import { extractOgImage } from "../lib/og-images.ts";
@@ -24,7 +24,6 @@ import { isDraftId } from "../lib/ids.ts";
 import { applyCacheHeaders, makeWeakEtag, maybeReturnNotModified } from "../lib/http-cache.ts";
 import { buildPage } from "../templates/layout.ts";
 import {
-  editionExists,
   statEdition,
   draftExists,
   readDraft,
@@ -83,7 +82,7 @@ function getLatestEditionTarget(files: string[]) {
 
 async function buildEditionPageContext(
   date: string,
-  curation: NonNullable<Awaited<ReturnType<typeof readCuration>>>,
+  curation: NonNullable<Awaited<ReturnType<typeof getRenderedCuration>>>,
   files: string[],
   options: { page?: number; pageSize?: number } = {}
 ) {
@@ -155,7 +154,7 @@ export function registerPublicRoutes(app: Hono, deps: AppDeps) {
           <p>Las curaciones apareceran aqui una vez generadas.<br>Vuelve pronto.</p>
         </div>
       `,
-          { recentCurations: [] }
+          { recentCurations: [], siteUrl: deps.config.siteUrl }
         )
       );
       response.headers.set("Cache-Control", "no-store");
@@ -168,7 +167,7 @@ export function registerPublicRoutes(app: Hono, deps: AppDeps) {
       return response;
     }
 
-    const curation = await readCuration(targetDate);
+    const curation = await getRenderedCuration(targetDate);
     if (!curation) {
       const response = c.html(
         buildPage(
@@ -180,7 +179,7 @@ export function registerPublicRoutes(app: Hono, deps: AppDeps) {
           <p>Error al leer la curacion.</p>
         </div>
       `,
-          { recentCurations: [] }
+          { recentCurations: [], siteUrl: deps.config.siteUrl }
         )
       );
       response.headers.set("Cache-Control", "no-store");
@@ -195,6 +194,8 @@ export function registerPublicRoutes(app: Hono, deps: AppDeps) {
         date: targetDate,
         isToday,
         canonicalPath: isToday ? "/" : `/curacion/${targetDate}`,
+        feedItems: curation.feedItems,
+        siteUrl: deps.config.siteUrl,
         ...ctx,
       })
     );
@@ -206,8 +207,14 @@ export function registerPublicRoutes(app: Hono, deps: AppDeps) {
     const date = c.req.param("date");
     if (!isCurationFileId(date)) return c.text("Fecha invalida", 400);
 
-    if (editionExists(date)) {
-      const info = await statEdition(date);
+    let info: Awaited<ReturnType<typeof statEdition>> | null = null;
+    try {
+      info = await statEdition(date);
+    } catch {
+      // file does not exist
+    }
+
+    if (info) {
       const etag = makeWeakEtag(date, info.size, info.mtimeMs);
       const notModified = maybeReturnNotModified(c, {
         etag,
@@ -218,7 +225,7 @@ export function registerPublicRoutes(app: Hono, deps: AppDeps) {
     }
 
     const files = await getCurationFiles();
-    const curation = await readCuration(date);
+    const curation = await getRenderedCuration(date);
 
     if (!curation) {
       return c.html(
@@ -232,7 +239,7 @@ export function registerPublicRoutes(app: Hono, deps: AppDeps) {
           <a href="/" class="back-link">← Volver a hoy</a>
         </div>
       `,
-          { recentCurations: (await getRecentCurations(allEditionsSidebar(files), SIDEBAR_PAGE_SIZE)) }
+          { recentCurations: (await getRecentCurations(allEditionsSidebar(files), SIDEBAR_PAGE_SIZE)), siteUrl: deps.config.siteUrl }
         ),
         404
       );
@@ -248,12 +255,13 @@ export function registerPublicRoutes(app: Hono, deps: AppDeps) {
         sidebarHasMore: allEditionsSidebar(files).length > SIDEBAR_PAGE_SIZE,
         sidebarHasPrev: false,
         sidebarPage: 1,
+        feedItems: curation.feedItems,
+        siteUrl: deps.config.siteUrl,
         ...ctx,
       })
     );
 
-    if (editionExists(date)) {
-      const info = await statEdition(date);
+    if (info) {
       applyCacheHeaders(response.headers, {
         etag: makeWeakEtag(date, info.size, info.mtimeMs),
         lastModified: info.mtime,
@@ -295,6 +303,7 @@ export function registerPublicRoutes(app: Hono, deps: AppDeps) {
         recentCurations: allCurations.slice(0, 5),
         canonicalPath: "/ediciones",
         hideSidebar: true,
+        siteUrl: deps.config.siteUrl,
       })
     );
     applyCacheHeaders(response.headers, {
@@ -326,6 +335,7 @@ export function registerPublicRoutes(app: Hono, deps: AppDeps) {
         canonicalPath: `/drafts/${draftId}`,
         hideSidebar: true,
         readingTime,
+        siteUrl: deps.config.siteUrl,
       })
     );
   });

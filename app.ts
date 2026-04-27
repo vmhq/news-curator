@@ -1,5 +1,5 @@
 import { existsSync } from "fs";
-import { mkdir, readFile } from "fs/promises";
+import { mkdir } from "fs/promises";
 import { basename, join } from "path";
 import { Hono } from "hono";
 import { serveStatic } from "hono/bun";
@@ -7,8 +7,7 @@ import type { RuntimeConfigInput } from "./lib/config.ts";
 import { createApiKeyGuard } from "./lib/auth.ts";
 import { type AppDeps } from "./lib/app-deps.ts";
 import { loadRuntimeConfig } from "./lib/config.ts";
-import { configureCurationsEnv } from "./lib/config.ts";
-import { getCacheStats, getCurationFiles, invalidateFilesCache, startDirWatcher, stopDirWatcher } from "./lib/curations.ts";
+import { getCacheStats, getCurationFiles, invalidateFilesCache, setCurationsDir, startDirWatcher, stopDirWatcher } from "./lib/curations.ts";
 import { logEvent } from "./lib/logging.ts";
 import { getMetricsSnapshot, recordRequest } from "./lib/observability.ts";
 import { InMemoryRateLimiter } from "./lib/rate-limit.ts";
@@ -18,7 +17,7 @@ import { registerPublicRoutes } from "./routes/public.ts";
 
 export function createApp(overrides: RuntimeConfigInput = {}) {
   const config = loadRuntimeConfig(overrides);
-  const { curationsDirChanged } = configureCurationsEnv({ curationsDir: config.curationsDir, siteUrl: config.siteUrl });
+  const curationsDirChanged = setCurationsDir(config.curationsDir);
   if (curationsDirChanged) {
     invalidateFilesCache();
   }
@@ -65,25 +64,23 @@ export function createApp(overrides: RuntimeConfigInput = {}) {
     if (!filename) return next();
 
     const filePath = join(config.uploadsDir, filename);
-    try {
-      const data = await readFile(filePath);
-      const ext = filename.split(".").pop()?.toLowerCase() ?? "";
-      const mime: Record<string, string> = {
-        jpg: "image/jpeg",
-        jpeg: "image/jpeg",
-        png: "image/png",
-        webp: "image/webp",
-        gif: "image/gif",
-        avif: "image/avif",
-        svg: "image/svg+xml",
-      };
-      return c.body(data, 200, {
-        "Content-Type": mime[ext] ?? "application/octet-stream",
-        "Cache-Control": "public, max-age=31536000, immutable",
-      });
-    } catch {
-      return next();
-    }
+    const file = Bun.file(filePath);
+    if (!(await file.exists())) return next();
+
+    const ext = filename.split(".").pop()?.toLowerCase() ?? "";
+    const mime: Record<string, string> = {
+      jpg: "image/jpeg",
+      jpeg: "image/jpeg",
+      png: "image/png",
+      webp: "image/webp",
+      gif: "image/gif",
+      avif: "image/avif",
+      svg: "image/svg+xml",
+    };
+    return c.body(file, 200, {
+      "Content-Type": mime[ext] ?? "application/octet-stream",
+      "Cache-Control": "public, max-age=31536000, immutable",
+    });
   });
 
   app.use(

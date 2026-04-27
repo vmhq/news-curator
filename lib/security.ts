@@ -3,6 +3,9 @@ import { Resolver } from "node:dns/promises";
 const ssrfResolver = new Resolver();
 ssrfResolver.setServers(["1.1.1.1", "8.8.8.8"]);
 
+const DNS_CACHE_TTL_MS = 5 * 60 * 1000;
+const dnsCache = new Map<string, { blocked: boolean; expiresAt: number }>();
+
 function isBlockedHost(host: string): boolean {
   const h = host.toLowerCase().replace(/^\[|\]$/g, "");
   if (h === "localhost" || h === "127.0.0.1" || h === "0.0.0.0") return true;
@@ -32,9 +35,14 @@ export async function isBlockedResolvedUrl(url: string): Promise<boolean> {
   if (isBlockedUrl(url)) return true;
   try {
     const parsed = new URL(url);
+    const cached = dnsCache.get(parsed.hostname);
+    if (cached && Date.now() < cached.expiresAt) {
+      return cached.blocked;
+    }
     const addresses = await ssrfResolver.resolve(parsed.hostname);
-    if (addresses.length === 0) return true;
-    return addresses.some((addr: string) => isBlockedHost(addr));
+    const blocked = addresses.length === 0 || addresses.some((addr: string) => isBlockedHost(addr));
+    dnsCache.set(parsed.hostname, { blocked, expiresAt: Date.now() + DNS_CACHE_TTL_MS });
+    return blocked;
   } catch {
     return true;
   }
