@@ -348,7 +348,7 @@ img { display: block; max-width: 100%; }
   padding-bottom: 56px;
   margin-bottom: 48px;
   border-bottom: 1px solid var(--rule);
-  align-items: end;
+  align-items: start;
   animation: fadeInUp 0.5s ease both;
 }
 
