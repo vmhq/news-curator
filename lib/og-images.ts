@@ -13,8 +13,14 @@ function isGoodOgImage(imgUrl: string): boolean {
   return true;
 }
 
+type OgCacheEntry = {
+  result: string | null;
+  expiresAt: number;
+};
+
 const MAX_OG_CACHE = 500;
-const ogImageCache = new Map<string, string | null>();
+const OG_CACHE_TTL_MS = 24 * 60 * 60 * 1000;
+const ogImageCache = new Map<string, OgCacheEntry>();
 
 export function getOgImageCacheStats() {
   return {
@@ -24,6 +30,24 @@ export function getOgImageCacheStats() {
 
 export function clearOgImageCache() {
   ogImageCache.clear();
+}
+
+export function getCachedOgImage(url: string): string | null | undefined {
+  const entry = ogImageCache.get(url);
+  if (!entry) return undefined;
+  if (Date.now() > entry.expiresAt) {
+    ogImageCache.delete(url);
+    return undefined;
+  }
+  return entry.result;
+}
+
+function setOgCache(url: string, result: string | null): void {
+  if (ogImageCache.size >= MAX_OG_CACHE) {
+    const firstKey = ogImageCache.keys().next().value;
+    if (firstKey !== undefined) ogImageCache.delete(firstKey);
+  }
+  ogImageCache.set(url, { result, expiresAt: Date.now() + OG_CACHE_TTL_MS });
 }
 
 export function resolveOgImageCandidate(pageUrl: string, html: string): string | null {
@@ -41,8 +65,14 @@ export function resolveOgImageCandidate(pageUrl: string, html: string): string |
 }
 
 export async function extractOgImage(url: string): Promise<string | null> {
-  if (ogImageCache.has(url)) return ogImageCache.get(url)!;
-  if (await isBlockedResolvedUrl(url)) return null;
+  const cached = getCachedOgImage(url);
+  if (cached !== undefined) return cached;
+
+  if (await isBlockedResolvedUrl(url)) {
+    setOgCache(url, null);
+    return null;
+  }
+
   let result: string | null = null;
   try {
     const controller = new AbortController();
@@ -53,12 +83,12 @@ export async function extractOgImage(url: string): Promise<string | null> {
       headers: { "User-Agent": "Mozilla/5.0 (compatible; DailyBrief/1.0)" },
     }).finally(() => clearTimeout(timeout));
     if (!resp.ok) {
-      ogImageCache.set(url, null);
+      setOgCache(url, null);
       return null;
     }
     const contentType = resp.headers.get("content-type") ?? "";
     if (!contentType.includes("html")) {
-      ogImageCache.set(url, null);
+      setOgCache(url, null);
       return null;
     }
     const reader = resp.body?.getReader();
@@ -78,10 +108,6 @@ export async function extractOgImage(url: string): Promise<string | null> {
   } catch {
     // best-effort
   }
-  if (ogImageCache.size >= MAX_OG_CACHE) {
-    const firstKey = ogImageCache.keys().next().value;
-    if (firstKey !== undefined) ogImageCache.delete(firstKey);
-  }
-  ogImageCache.set(url, result);
+  setOgCache(url, result);
   return result;
 }

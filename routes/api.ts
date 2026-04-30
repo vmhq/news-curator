@@ -1,6 +1,7 @@
 import { basename } from "path";
 import type { Context, Hono, Next } from "hono";
 import type { AppDeps } from "../lib/app-deps.ts";
+import { isSafeFilename } from "../lib/security.ts";
 import { renderLineDiff } from "../lib/diff.ts";
 import { checkImageUrl, parseFrontmatter, serializeFrontmatter, validateImageUrl } from "../lib/frontmatter.ts";
 import {
@@ -115,7 +116,7 @@ async function publishCurationContent(
 
 function createRateLimitMiddleware(deps: AppDeps, bucket: keyof AppDeps["config"]["rateLimits"]) {
   return async (c: Context, next: Next) => {
-    const ip = getRequestIp(c);
+    const ip = getRequestIp(c, deps.config.trustProxy);
     const result = deps.rateLimiter.hit(bucket, ip, deps.config.rateLimits[bucket]);
     if (result.limited) {
       incrementCounter("rateLimited");
@@ -260,6 +261,9 @@ export function registerApiRoutes(app: Hono, deps: AppDeps) {
 
     const ext = deps.config.imageExt[file.type];
     const filename = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}.${ext}`;
+    if (!isSafeFilename(filename)) {
+      return c.json({ error: "Generated filename is invalid" }, 500);
+    }
 
     await writeUpload(deps.config.uploadsDir, filename, Buffer.from(await file.arrayBuffer()));
     incrementCounter("uploads");

@@ -36,11 +36,25 @@ export class InMemoryRateLimiter {
   snapshot() {
     return { trackedBuckets: this.buckets.size };
   }
-
-
 }
 
-export function getRequestIp(c: Context): string {
+function looksLikeIp(addr: string): boolean {
+  if (!addr) return false;
+  // IPv4
+  if (/^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(addr)) return true;
+  // IPv6 (simplified)
+  if (/^[0-9a-fA-F:]+$/.test(addr) && addr.includes(":")) return true;
+  return false;
+}
+
+export function getRequestIp(c: Context, trustProxy = false): string {
+  if (trustProxy) {
+    const forwarded = c.req.header("X-Forwarded-For");
+    if (forwarded) {
+      const first = forwarded.split(",")[0]?.trim();
+      if (first && looksLikeIp(first)) return first;
+    }
+  }
   const connIp = (c.env as { requestIP?: { address: string } } | undefined)?.requestIP?.address;
   return connIp ?? "anonymous";
 }

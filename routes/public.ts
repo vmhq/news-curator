@@ -6,7 +6,7 @@ import {
   getRenderedCuration,
   renderCurationContent,
 } from "../lib/curations.ts";
-import { extractOgImage } from "../lib/og-images.ts";
+import { extractOgImage, getCachedOgImage } from "../lib/og-images.ts";
 import {
   estimateReadingTime,
   extractFeatured,
@@ -18,9 +18,8 @@ import {
   formatDateEs,
   todayLocal,
 } from "../lib/dates.ts";
-import { isCurationFileId } from "../lib/ids.ts";
+import { isCurationFileId, isDraftId } from "../lib/ids.ts";
 import { escapeHtml } from "../lib/html.ts";
-import { isDraftId } from "../lib/ids.ts";
 import { applyCacheHeaders, makeWeakEtag, maybeReturnNotModified } from "../lib/http-cache.ts";
 import { buildPage } from "../templates/layout.ts";
 import {
@@ -91,7 +90,14 @@ async function buildEditionPageContext(
   const readingTime = estimateReadingTime(curation.raw);
 
   let heroImage: string | null = curation.coverImage;
-  if (!heroImage && featured?.firstUrl) heroImage = await extractOgImage(featured.firstUrl);
+  if (!heroImage && featured?.firstUrl) {
+    const cached = getCachedOgImage(featured.firstUrl);
+    if (cached !== undefined) {
+      heroImage = cached;
+    } else {
+      extractOgImage(featured.firstUrl).catch(() => {});
+    }
+  }
 
   const page = Math.max(1, options.page ?? 1);
   const pageSize = options.pageSize ?? SIDEBAR_PAGE_SIZE;

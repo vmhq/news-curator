@@ -31,6 +31,7 @@ export type RuntimeConfig = {
   imageExt: Record<string, string>;
   draftTtlHours: number;
   maxVersionsPerEdition: number;
+  trustProxy: boolean;
   rateLimits: {
     search: RateLimitRule;
     images: RateLimitRule;
@@ -83,6 +84,7 @@ export function loadRuntimeConfig(overrides: RuntimeConfigInput = {}): RuntimeCo
     draftTtlHours: overrides.draftTtlHours ?? readNumber(process.env.DRAFT_TTL_HOURS, 72),
     maxVersionsPerEdition:
       overrides.maxVersionsPerEdition ?? readNumber(process.env.MAX_VERSIONS_PER_EDITION, 20),
+    trustProxy: overrides.trustProxy ?? process.env.TRUST_PROXY === "true",
     rateLimits: {
       search: overrides.rateLimits?.search ?? defaultRateLimits.search,
       images: overrides.rateLimits?.images ?? defaultRateLimits.images,

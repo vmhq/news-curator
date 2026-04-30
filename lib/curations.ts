@@ -142,8 +142,9 @@ async function getSearchIndex(): Promise<Array<{ date: string; content: string; 
   const index: Array<{ date: string; content: string; lower: string; summary: string }> = [];
   for (const date of files) {
     try {
-      const content = await readFile(join(activeCurationsDir, `${date}.md`), "utf-8");
-      index.push({ date, content, lower: content.toLowerCase(), summary: getSummary(content) });
+      const raw = await readFile(join(activeCurationsDir, `${date}.md`), "utf-8");
+      const content = raw.slice(0, SEARCH_INDEX_MAX_CHARS);
+      index.push({ date, content, lower: content.toLowerCase(), summary: getSummary(raw) });
     } catch (error) {
       logEvent("curations.index_read_failed", { date, error: String(error) });
     }
@@ -301,4 +302,5 @@ export async function renderCurationContent(
 }
 
 const MAX_SUMMARY_CACHE = 1000;
+const SEARCH_INDEX_MAX_CHARS = 3000;
 

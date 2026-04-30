@@ -2,9 +2,11 @@ import { existsSync } from "fs";
 import { mkdir } from "fs/promises";
 import { basename, join } from "path";
 import { Hono } from "hono";
+import { compress } from "hono/compress";
 import { serveStatic } from "hono/bun";
 import type { RuntimeConfigInput } from "./lib/config.ts";
 import { createApiKeyGuard } from "./lib/auth.ts";
+import { isSafeFilename } from "./lib/security.ts";
 import { type AppDeps } from "./lib/app-deps.ts";
 import { loadRuntimeConfig } from "./lib/config.ts";
 import { getCacheStats, getCurationFiles, invalidateFilesCache, setCurationsDir, startDirWatcher, stopDirWatcher } from "./lib/curations.ts";
@@ -44,24 +46,48 @@ export function createApp(overrides: RuntimeConfigInput = {}) {
     startedAt: Date.now(),
   };
 
+  const MAX_BODY_SIZE = 1_000_000;
+
   app.use("*", async (c, next) => {
-    recordRequest();
+    const contentLength = c.req.header("Content-Length");
+    if (contentLength) {
+      const size = parseInt(contentLength, 10);
+      if (!Number.isNaN(size) && size > MAX_BODY_SIZE) {
+        return c.json({ error: "Request body too large" }, 413);
+      }
+    }
     await next();
+  });
+
+  const selectiveCompress = async (c: any, next: any) => {
+    const path = c.req.path;
+    if (path.startsWith("/api/") || path === "/health" || path === "/health/internal" || path === "/ready") {
+      return next();
+    }
+    return compress({ encoding: "gzip" })(c, next);
+  };
+  app.use("*", selectiveCompress);
+
+  app.use("*", async (c, next) => {
+    const start = Date.now();
+    await next();
+    recordRequest(Date.now() - start);
     c.res.headers.set("X-Frame-Options", "DENY");
     c.res.headers.set("X-Content-Type-Options", "nosniff");
     c.res.headers.set("Referrer-Policy", "strict-origin-when-cross-origin");
-    c.res.headers.set(
-      "Content-Security-Policy",
-      "default-src 'self'; script-src 'self'; style-src 'self' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' https: data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'self';"
-    );
+    let csp = "default-src 'self'; script-src 'self'; style-src 'self' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' https:; connect-src 'self'; frame-ancestors 'none'; base-uri 'self';";
     if (config.siteUrl.startsWith("https://")) {
+      csp += " upgrade-insecure-requests;";
       c.res.headers.set("Strict-Transport-Security", "max-age=31536000; includeSubDomains");
     }
+    c.res.headers.set("Content-Security-Policy", csp);
   });
 
   app.use("/static/uploads/*", async (c, next) => {
     const filename = basename(c.req.path.slice("/static/uploads/".length));
-    if (!filename) return next();
+    if (!filename || !isSafeFilename(filename)) {
+      return c.json({ error: "Invalid filename" }, 400);
+    }
 
     const filePath = join(config.uploadsDir, filename);
     const file = Bun.file(filePath);

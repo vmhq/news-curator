@@ -3,7 +3,7 @@ import { Resolver } from "node:dns/promises";
 const ssrfResolver = new Resolver();
 ssrfResolver.setServers(["1.1.1.1", "8.8.8.8"]);
 
-const DNS_CACHE_TTL_MS = 5 * 60 * 1000;
+const DNS_CACHE_TTL_MS = 60 * 60 * 1000; // 1 hour — reduces DNS rebinding window
 const dnsCache = new Map<string, { blocked: boolean; expiresAt: number }>();
 
 function isBlockedHost(host: string): boolean {
@@ -29,6 +29,14 @@ export function isBlockedUrl(url: string): boolean {
   } catch {
     return true;
   }
+}
+
+const SAFE_FILENAME_RE = /^[a-zA-Z0-9._-]+$/;
+
+export function isSafeFilename(filename: string): boolean {
+  if (!filename) return false;
+  if (filename.startsWith(".")) return false;
+  return SAFE_FILENAME_RE.test(filename);
 }
 
 export async function isBlockedResolvedUrl(url: string): Promise<boolean> {
