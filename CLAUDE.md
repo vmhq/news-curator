@@ -25,7 +25,7 @@ Server runs on `http://localhost:8391`. There are Bun tests in `tests/` (no lint
 | File | Responsibility |
 |------|---------------|
 | `server.ts` | Bun entrypoint; exports `{ port, fetch }` and `createApp` |
-| `app.ts` | `createApp()` app assembly, middleware, static files, health/readiness, route registration |
+| `app.ts` | `createApp()` app assembly, middleware (1 MB body limit, selective gzip, security headers), static files, health/readiness, route registration |
 | `routes/public.ts` | Public HTML pages (`/`, `/latest`, `/curacion/:date`, `/ediciones`, `/drafts/:id`) |
 | `routes/api.ts` | JSON API, authenticated write endpoints, drafts, versions, diff, uploads |
 | `lib/app-deps.ts` | Shared `AppDeps` type for route registration |
@@ -39,11 +39,11 @@ Server runs on `http://localhost:8391`. There are Bun tests in `tests/` (no lint
 | `lib/http-cache.ts` | ETag / Last-Modified helpers |
 | `lib/ids.ts` | Edition, draft, and version ID validation |
 | `lib/logging.ts` | JSON structured event logging |
-| `lib/observability.ts` | In-memory request and action counters |
+| `lib/observability.ts` | In-memory request/action counters; latency tracking (avg, min, max, P95, last 1000 samples) |
 | `lib/og-images.ts` | OG image scraping with timeout, filtering, and cache |
 | `lib/rate-limit.ts` | In-memory per-IP rate limiting |
 | `lib/retention.ts` | Draft cleanup and version retention |
-| `lib/security.ts` | SSRF protection: `isBlockedUrl()`, `isBlockedResolvedUrl()` |
+| `lib/security.ts` | SSRF protection: `isBlockedUrl()`, `isBlockedResolvedUrl()`; filename safety: `isSafeFilename()` |
 | `lib/storage.ts` | File-system abstraction for editions, drafts, versions, uploads |
 | `lib/validation.ts` | Editorial validation, featured story extraction, reading time |
 | `templates/layout.ts` | `buildPage()` and `escapeHtml()` |
@@ -55,6 +55,14 @@ Server runs on `http://localhost:8391`. There are Bun tests in `tests/` (no lint
 - `SITE_URL` — env var, default `http://localhost:8391` — used for canonical URLs and OG tags
 - `DEFAULT_COVER = "${SITE_URL}/static/cover.svg"` — fallback hero image
 - `TZ = "America/Santiago"` — timezone for `todayLocal()`
+- `draftTtlHours` — default 72 h; `maxVersionsPerEdition` — default 20
+
+**Default rate limits (overridable via env):**
+- search: 20 req / 10 s
+- images: 10 req / 60 s
+- publish: 10 req / 60 s
+- drafts: 20 req / 60 s
+- edits: 30 req / 60 s
 
 ---
 
@@ -100,12 +108,14 @@ Server runs on `http://localhost:8391`. There are Bun tests in `tests/` (no lint
 ### `lib/security.ts`
 
 - `isBlockedUrl(url)` — rejects private IPs, loopback, link-local, `.internal`/`.local`/`.localhost` domains, and non-http(s) protocols
-- `isBlockedResolvedUrl(url)` — DNS-aware SSRF protection using external resolvers (`1.1.1.1`, `8.8.8.8`) with a 5-minute TTL cache; resolves the hostname and checks if any returned address is blocked
+- `isSafeFilename(filename)` — allows only alphanumeric, dots, dashes, underscores; rejects empty strings and leading dots
+- `isBlockedResolvedUrl(url)` — DNS-aware SSRF protection using external resolvers (`1.1.1.1`, `8.8.8.8`) with a 1-hour TTL cache; resolves the hostname and checks if any returned address is blocked
 
 ### `lib/og-images.ts`
 
 - `resolveOgImageCandidate(pageUrl, html)` — scrapes `og:image` and `twitter:image` meta tags from HTML, resolves relative URLs against `pageUrl`, and filters out logos/icons via `isGoodOgImage()`
-- `extractOgImage(url)` — fetches a URL with 5s timeout, reads max 50 KB, runs `resolveOgImageCandidate()`, caches result in `ogImageCache` (max 500 entries, LRU eviction); returns `string | null`
+- `extractOgImage(url)` — fetches a URL with 5s timeout, reads max 50 KB, runs `resolveOgImageCandidate()`, caches result in `ogImageCache` (max 500 entries, 24-hour TTL, LRU eviction); returns `string | null`
+- `getCachedOgImage(url)` — synchronous cache read; returns `string | null | undefined` (undefined = not cached)
 - `getOgImageCacheStats()` / `clearOgImageCache()` — cache introspection
 
 **Hero image priority:** `coverImage` from frontmatter → `extractOgImage()` from featured URL → `DEFAULT_COVER`
@@ -132,6 +142,19 @@ Abstracts all file-system operations so routes don't import `fs` directly:
 - `dateFromFileId(id)` — strips time suffix: `"2026-04-07_22-21"` → `"2026-04-07"`
 - `formatDateEs(dateStr)` — formats a file ID to Spanish date string; if the ID has a time suffix, appends `(HH:MM)` e.g. `"Miércoles 8 de abril de 2026 (22:21)"`
 - `allEditionsSidebar(files)` — returns files as-is (already sorted desc)
+
+### `lib/rate-limit.ts`
+
+- `InMemoryRateLimiter` — window-based per-IP rate limiter; max 10,000 tracked buckets with LRU eviction
+  - `hit(bucket, key, rule)` → `{ limited: boolean, retryAfterMs: number }`
+  - `snapshot()` → `{ trackedBuckets: number }`
+- `getRequestIp(c, trustProxy)` — extracts client IP; reads `X-Forwarded-For` when `trustProxy=true`, falls back to Cloudflare's `c.env.requestIP.address`, defaults to `"anonymous"`
+
+### `lib/ids.ts`
+
+- `isCurationFileId(id)` — validates `YYYY-MM-DD` or `YYYY-MM-DD_HH-MM`
+- `isDraftId(id)` — validates UUID (36-char hex)
+- `isVersionId(id)` — validates `YYYY-MM-DDThh-mm-ss-Z-{reason}` (timestamp + reason slug)
 
 ### `lib/retention.ts`
 
