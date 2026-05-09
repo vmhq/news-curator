@@ -25,7 +25,7 @@ Server runs on `http://localhost:8391`. There are Bun tests in `tests/` (no lint
 | File | Responsibility |
 |------|---------------|
 | `server.ts` | Bun entrypoint; exports `{ port, fetch }` and `createApp` |
-| `app.ts` | `createApp()` app assembly, middleware (1 MB body limit, selective gzip, security headers), static files, health/readiness, route registration |
+| `app.ts` | `createApp()` app assembly, middleware (1 MB body limit, selective gzip, security headers), static files, health/readiness, global `onError`/`notFound` handlers, route registration |
 | `routes/public.ts` | Public HTML pages (`/`, `/latest`, `/curacion/:date`, `/ediciones`, `/drafts/:id`) |
 | `routes/api.ts` | JSON API, authenticated write endpoints, drafts, versions, diff, uploads |
 | `lib/app-deps.ts` | Shared `AppDeps` type for route registration |
@@ -221,6 +221,7 @@ Abstracts all file-system operations so routes don't import `fs` directly:
 ## HTML `<head>` per page
 
 - `noindex, nofollow` + `googlebot: noindex` meta tags (private site)
+- `<meta name="description">` — same content as `og:description`
 - Open Graph and Twitter Card meta tags (uses hero image or `DEFAULT_COVER`)
 - Canonical URL using `SITE_URL + canonicalPath`
 - `theme-init.js` loaded synchronously in `<head>` to prevent dark-mode flash
@@ -232,6 +233,8 @@ Abstracts all file-system operations so routes don't import `fs` directly:
 
 - All responses receive `X-Frame-Options: DENY`, `X-Content-Type-Options: nosniff`, `Referrer-Policy`, and `Content-Security-Policy`
 - `Strict-Transport-Security` is only sent when `SITE_URL` starts with `https://`
+- Global `app.onError()` handler logs via `logEvent("app.unhandled_error")` and returns JSON for `/api/*` paths, plain text otherwise
+- Global `app.notFound()` handler returns JSON 404 for `/api/*` paths, plain text otherwise
 - Public edition pages and API reads use conditional caching helpers (`ETag`, `Last-Modified`)
 - Search and authenticated mutation endpoints are rate-limited in memory by client IP
 - Write routes are disabled when `API_KEY` is not configured
