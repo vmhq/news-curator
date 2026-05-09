@@ -1,7 +1,7 @@
 import { existsSync } from "fs";
 import { mkdir } from "fs/promises";
 import { basename, join } from "path";
-import { Hono } from "hono";
+import { Hono, type Context, type Next } from "hono";
 import { compress } from "hono/compress";
 import { serveStatic } from "hono/bun";
 import type { RuntimeConfigInput } from "./lib/config.ts";
@@ -59,7 +59,7 @@ export function createApp(overrides: RuntimeConfigInput = {}) {
     await next();
   });
 
-  const selectiveCompress = async (c: any, next: any) => {
+  const selectiveCompress = async (c: Context, next: Next) => {
     const path = c.req.path;
     if (path.startsWith("/api/") || path === "/health" || path === "/health/internal" || path === "/ready") {
       return next();
@@ -181,6 +181,21 @@ export function createApp(overrides: RuntimeConfigInput = {}) {
       logEvent("app.readiness_failed", { error: error instanceof Error ? error.message : String(error) });
       return c.json({ status: "not_ready" }, 503);
     }
+  });
+
+  app.onError((err, c) => {
+    logEvent("app.unhandled_error", { error: err instanceof Error ? err.message : String(err), path: c.req.path });
+    if (c.req.path.startsWith("/api/")) {
+      return c.json({ error: "Internal Server Error" }, 500);
+    }
+    return c.text("Internal Server Error", 500);
+  });
+
+  app.notFound((c) => {
+    if (c.req.path.startsWith("/api/")) {
+      return c.json({ error: "Not Found" }, 404);
+    }
+    return c.text("Not Found", 404);
   });
 
   registerApiRoutes(app, deps);

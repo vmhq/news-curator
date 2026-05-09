@@ -284,6 +284,7 @@ export function buildPage(
   <meta name="robots" content="noindex, nofollow">
   <meta name="googlebot" content="noindex, nofollow">
   <meta name="referrer" content="strict-origin-when-cross-origin">
+  <meta name="description" content="${escapeHtml(ogDescription)}">
   <title>${escapeHtml(title)}</title>
   <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
   <link rel="canonical" href="${escapeHtml(canonicalUrl)}">
