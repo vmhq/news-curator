@@ -61,6 +61,21 @@
 /* ─── Reset ─── */
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
+.skip-to-main {
+  position: absolute;
+  left: -9999px;
+  top: 1rem;
+  z-index: 9999;
+  padding: 0.5rem 1rem;
+  background: var(--accent);
+  color: #fff;
+  border-radius: var(--radius-sm);
+  text-decoration: none;
+  font-size: 0.875rem;
+  font-weight: 500;
+}
+.skip-to-main:focus { left: 1rem; }
+
 html {
   scroll-padding-top: calc(var(--nav-height) + 24px);
 }

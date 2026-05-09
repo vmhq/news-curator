@@ -1,5 +1,6 @@
 import { basename } from "path";
-import type { Context, Hono, Next } from "hono";
+import { Hono, type Context, type Next } from "hono";
+import { z } from "zod";
 import type { AppDeps } from "../lib/app-deps.ts";
 import { isSafeFilename } from "../lib/security.ts";
 import { renderLineDiff } from "../lib/diff.ts";
@@ -40,6 +41,13 @@ import {
   writeUpload,
 } from "../lib/storage.ts";
 
+const ContentBodySchema = z.object({ content: z.string() });
+const PublishBodySchema = z.object({
+  content: z.string().optional(),
+  draft_id: z.string().optional(),
+});
+const MetaPatchBodySchema = z.record(z.string(), z.union([z.string(), z.null()]));
+
 function editionIdFromNow(): string {
   const now = new Date();
   const date = now.toLocaleDateString("sv-SE", { timeZone: "America/Santiago" });
@@ -61,10 +69,9 @@ async function readRequestContent(c: Context): Promise<string | Response> {
   const contentType = c.req.header("Content-Type") ?? "";
   if (contentType.includes("application/json")) {
     const body = await c.req.json();
-    if (typeof body.content !== "string") {
-      return c.json({ error: "Missing 'content' field" }, 400);
-    }
-    return body.content;
+    const parsed = ContentBodySchema.safeParse(body);
+    if (!parsed.success) return c.json({ error: "Missing 'content' field" }, 400);
+    return parsed.data.content;
   }
   return c.req.text();
 }
@@ -131,14 +138,15 @@ function withApiKey(deps: AppDeps, disabledMessage: string) {
   return async (c: Context, next: Next) => deps.apiKeyGuard.requireApiKey(c, next, disabledMessage);
 }
 
-export function registerApiRoutes(app: Hono, deps: AppDeps) {
+export function createApiRouter(deps: AppDeps): Hono {
+  const api = new Hono();
   const limitSearch = createRateLimitMiddleware(deps, "search");
   const limitImages = createRateLimitMiddleware(deps, "images");
   const limitPublish = createRateLimitMiddleware(deps, "publish");
   const limitDrafts = createRateLimitMiddleware(deps, "drafts");
   const limitEdits = createRateLimitMiddleware(deps, "edits");
 
-  app.get("/api/curations", async (c) => {
+  api.get("/curations", async (c) => {
     const files = await getCurationFiles();
     const limit = Math.max(1, Math.min(50, Number.parseInt(c.req.query("limit") || "10", 10) || 10));
 
@@ -195,7 +203,7 @@ export function registerApiRoutes(app: Hono, deps: AppDeps) {
     return response;
   });
 
-  app.get("/api/curations/:date", async (c) => {
+  api.get("/curations/:date", async (c) => {
     const date = c.req.param("date");
     if (!isCurationFileId(date)) return c.json({ error: "Invalid edition ID format" }, 400);
 
@@ -220,8 +228,8 @@ export function registerApiRoutes(app: Hono, deps: AppDeps) {
     return response;
   });
 
-  app.use("/api/search", limitSearch);
-  app.get("/api/search", async (c) => {
+  api.use("/search", limitSearch);
+  api.get("/search", async (c) => {
     incrementCounter("searches");
     const query = c.req.query("q")?.slice(0, 200).toLowerCase();
     if (!query || query.length < 2) return c.json({ results: [] });
@@ -238,9 +246,9 @@ export function registerApiRoutes(app: Hono, deps: AppDeps) {
     return response;
   });
 
-  app.use("/api/images", withApiKey(deps, "Upload endpoint disabled: API_KEY not configured"));
-  app.use("/api/images", limitImages);
-  app.post("/api/images", async (c) => {
+  api.use("/images", withApiKey(deps, "Upload endpoint disabled: API_KEY not configured"));
+  api.use("/images", limitImages);
+  api.post("/images", async (c) => {
     let formData: FormData;
     try {
       formData = await c.req.formData();
@@ -271,8 +279,8 @@ export function registerApiRoutes(app: Hono, deps: AppDeps) {
     return c.json({ success: true, url: `/static/uploads/${filename}` }, 201);
   });
 
-  app.use("/api/validate", withApiKey(deps, "Validate endpoint disabled: API_KEY not configured"));
-  app.post("/api/validate", async (c) => {
+  api.use("/validate", withApiKey(deps, "Validate endpoint disabled: API_KEY not configured"));
+  api.post("/validate", async (c) => {
     const contentOrResponse = await readRequestContent(c);
     if (contentOrResponse instanceof Response) return contentOrResponse;
     const validation = validateCurationContent(contentOrResponse);
@@ -284,14 +292,17 @@ export function registerApiRoutes(app: Hono, deps: AppDeps) {
     return c.json({ valid: validation.valid, validation }, validation.valid ? 200 : 422);
   });
 
-  app.use("/api/publish", withApiKey(deps, "Publish endpoint disabled: API_KEY not configured"));
-  app.use("/api/publish", limitPublish);
-  app.post("/api/publish", async (c) => {
+  api.use("/publish", withApiKey(deps, "Publish endpoint disabled: API_KEY not configured"));
+  api.use("/publish", limitPublish);
+  api.post("/publish", async (c) => {
     const contentType = c.req.header("Content-Type") ?? "";
     let content: string;
 
     if (contentType.includes("application/json")) {
-      const body = await c.req.json();
+      const rawBody = await c.req.json();
+      const parsed = PublishBodySchema.safeParse(rawBody);
+      if (!parsed.success) return c.json({ error: "Missing 'content' or 'draft_id' field" }, 400);
+      const body = parsed.data;
       if (typeof body.draft_id === "string") {
         const draftId = body.draft_id;
         if (!isDraftId(draftId)) return c.json({ error: "Invalid draft_id" }, 400);
@@ -324,10 +335,10 @@ export function registerApiRoutes(app: Hono, deps: AppDeps) {
   });
 
   const draftAuth = withApiKey(deps, "Draft endpoint disabled: API_KEY not configured");
-  app.use("/api/drafts", draftAuth, limitDrafts);
-  app.use("/api/drafts/*", draftAuth, limitDrafts);
+  api.use("/drafts", draftAuth, limitDrafts);
+  api.use("/drafts/*", draftAuth, limitDrafts);
 
-  app.get("/api/drafts/recent", async (c) => {
+  api.get("/drafts/recent", async (c) => {
     const drafts = await listDrafts(deps.config.draftsDir);
     if (drafts.length === 0) return c.json({ draft: null });
 
@@ -346,7 +357,7 @@ export function registerApiRoutes(app: Hono, deps: AppDeps) {
     });
   });
 
-  app.post("/api/drafts", async (c) => {
+  api.post("/drafts", async (c) => {
     const contentOrResponse = await readRequestContent(c);
     if (contentOrResponse instanceof Response) return contentOrResponse;
 
@@ -377,7 +388,7 @@ export function registerApiRoutes(app: Hono, deps: AppDeps) {
     );
   });
 
-  app.get("/api/drafts/:id", async (c) => {
+  api.get("/drafts/:id", async (c) => {
     const draftId = c.req.param("id");
     if (!isDraftId(draftId)) return c.json({ error: "Invalid draft ID" }, 400);
 
@@ -388,7 +399,7 @@ export function registerApiRoutes(app: Hono, deps: AppDeps) {
     return c.json({ draft: draftId, content, validation: validateCurationContent(content) });
   });
 
-  app.post("/api/drafts/:id/publish", async (c) => {
+  api.post("/drafts/:id/publish", async (c) => {
     const draftId = c.req.param("id");
     if (!isDraftId(draftId)) return c.json({ error: "Invalid draft ID" }, 400);
 
@@ -405,25 +416,25 @@ export function registerApiRoutes(app: Hono, deps: AppDeps) {
     return c.json(published.body, published.status as 201 | 400 | 422);
   });
 
-  app.use("/api/curations/:date", async (c, next) => {
+  api.use("/curations/:date", async (c, next) => {
     if (c.req.method === "GET") return next();
     return deps.apiKeyGuard.requireApiKey(c, next, "Edit endpoint disabled: API_KEY not configured");
   });
-  app.use("/api/curations/:date", async (c, next) => {
+  api.use("/curations/:date", async (c, next) => {
     if (c.req.method === "GET") return next();
     return limitEdits(c, next);
   });
 
-  app.use("/api/curations/:date/meta", withApiKey(deps, "Edit endpoint disabled: API_KEY not configured"));
-  app.use("/api/curations/:date/meta", limitEdits);
-  app.use("/api/curations/:date/versions", withApiKey(deps, "Versions endpoint disabled: API_KEY not configured"));
-  app.use("/api/curations/:date/versions", limitEdits);
-  app.use("/api/curations/:date/versions/*", withApiKey(deps, "Versions endpoint disabled: API_KEY not configured"));
-  app.use("/api/curations/:date/versions/*", limitEdits);
-  app.use("/api/curations/:date/diff/latest", withApiKey(deps, "Diff endpoint disabled: API_KEY not configured"));
-  app.use("/api/curations/:date/diff/latest", limitEdits);
+  api.use("/curations/:date/meta", withApiKey(deps, "Edit endpoint disabled: API_KEY not configured"));
+  api.use("/curations/:date/meta", limitEdits);
+  api.use("/curations/:date/versions", withApiKey(deps, "Versions endpoint disabled: API_KEY not configured"));
+  api.use("/curations/:date/versions", limitEdits);
+  api.use("/curations/:date/versions/*", withApiKey(deps, "Versions endpoint disabled: API_KEY not configured"));
+  api.use("/curations/:date/versions/*", limitEdits);
+  api.use("/curations/:date/diff/latest", withApiKey(deps, "Diff endpoint disabled: API_KEY not configured"));
+  api.use("/curations/:date/diff/latest", limitEdits);
 
-  app.get("/api/curations/:date/versions", async (c) => {
+  api.get("/curations/:date/versions", async (c) => {
     const date = c.req.param("date");
     if (!isCurationFileId(date)) return c.json({ error: "Invalid edition ID format" }, 400);
 
@@ -437,7 +448,7 @@ export function registerApiRoutes(app: Hono, deps: AppDeps) {
     return c.json({ edition: date, versions });
   });
 
-  app.get("/api/curations/:date/versions/:version", async (c) => {
+  api.get("/curations/:date/versions/:version", async (c) => {
     const date = c.req.param("date");
     const version = c.req.param("version");
     if (!isCurationFileId(date)) return c.json({ error: "Invalid edition ID format" }, 400);
@@ -448,7 +459,7 @@ export function registerApiRoutes(app: Hono, deps: AppDeps) {
     return c.json({ edition: date, version, content });
   });
 
-  app.get("/api/curations/:date/diff/latest", async (c) => {
+  api.get("/curations/:date/diff/latest", async (c) => {
     const date = c.req.param("date");
     if (!isCurationFileId(date)) return c.json({ error: "Invalid edition ID format" }, 400);
 
@@ -470,7 +481,7 @@ export function registerApiRoutes(app: Hono, deps: AppDeps) {
     });
   });
 
-  app.put("/api/curations/:date", async (c) => {
+  api.put("/curations/:date", async (c) => {
     const date = c.req.param("date");
     if (!isCurationFileId(date)) return c.json({ error: "Invalid edition ID format" }, 400);
 
@@ -512,16 +523,18 @@ export function registerApiRoutes(app: Hono, deps: AppDeps) {
     return c.json(responseBody);
   });
 
-  app.patch("/api/curations/:date/meta", async (c) => {
+  api.patch("/curations/:date/meta", async (c) => {
     const date = c.req.param("date");
     if (!isCurationFileId(date)) return c.json({ error: "Invalid edition ID format" }, 400);
 
     if (!editionExists(date, deps.config.curationsDir)) return c.json({ error: "Edition not found" }, 404);
 
-    const patch = (await c.req.json()) as Record<string, string | null>;
-    if (typeof patch !== "object" || Array.isArray(patch)) {
+    const rawPatch = await c.req.json();
+    const patchParsed = MetaPatchBodySchema.safeParse(rawPatch);
+    if (!patchParsed.success) {
       return c.json({ error: "Body must be a JSON object of frontmatter fields" }, 400);
     }
+    const patch = patchParsed.data;
 
     const existing = await readEdition(date, deps.config.curationsDir);
     if (!existing) return c.json({ error: "Edition not found" }, 404);
@@ -547,4 +560,6 @@ export function registerApiRoutes(app: Hono, deps: AppDeps) {
     if (warning) responseBody.warning = warning;
     return c.json(responseBody);
   });
+
+  return api;
 }

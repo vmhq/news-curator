@@ -94,6 +94,9 @@ export function buildPage(
   const canonicalUrl = `${siteUrl}${canonicalPath}`;
   const ogDescription =
     featured?.body ?? "Noticias de tecnología e inteligencia artificial curadas diariamente por IA.";
+  const metaDescription = ogDescription.length > 155
+    ? ogDescription.slice(0, ogDescription.lastIndexOf(" ", 155)) + "…"
+    : ogDescription;
   const ogImage = heroImage ?? `${siteUrl}/static/cover.svg`;
 
   const isArchive = canonicalPath === "/ediciones";
@@ -284,7 +287,7 @@ export function buildPage(
   <meta name="robots" content="noindex, nofollow">
   <meta name="googlebot" content="noindex, nofollow">
   <meta name="referrer" content="strict-origin-when-cross-origin">
-  <meta name="description" content="${escapeHtml(ogDescription)}">
+  <meta name="description" content="${escapeHtml(metaDescription)}">
   <title>${escapeHtml(title)}</title>
   <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
   <link rel="canonical" href="${escapeHtml(canonicalUrl)}">
@@ -308,6 +311,7 @@ export function buildPage(
   <link rel="stylesheet" href="/static/style.css">
 </head>
 <body>
+  <a href="#article-body" class="skip-to-main">Saltar al contenido</a>
   <div id="readProgress" class="read-progress"></div>
 
   <nav class="navbar">

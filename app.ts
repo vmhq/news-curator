@@ -14,7 +14,7 @@ import { logEvent } from "./lib/logging.ts";
 import { getMetricsSnapshot, recordRequest } from "./lib/observability.ts";
 import { InMemoryRateLimiter } from "./lib/rate-limit.ts";
 import { runRetentionPass } from "./lib/retention.ts";
-import { registerApiRoutes } from "./routes/api.ts";
+import { createApiRouter } from "./routes/api.ts";
 import { registerPublicRoutes } from "./routes/public.ts";
 
 export function createApp(overrides: RuntimeConfigInput = {}) {
@@ -198,7 +198,7 @@ export function createApp(overrides: RuntimeConfigInput = {}) {
     return c.text("Not Found", 404);
   });
 
-  registerApiRoutes(app, deps);
+  app.route("/api", createApiRouter(deps));
   registerPublicRoutes(app, deps);
 
   return app;
