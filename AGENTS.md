@@ -27,7 +27,7 @@ Multi-file server using **Bun** runtime + **Hono** framework. All HTML is server
 | File | Responsibility |
 |------|---------------|
 | `server.ts` | Bun entrypoint; exports `{ port, fetch }` and `createApp` |
-| `app.ts` | `createApp()` app assembly, middleware, static files, health/readiness, route registration |
+| `app.ts` | `createApp()` app assembly, middleware (1 MB body limit, selective gzip, security headers), static files, health/readiness, global `onError`/`notFound` handlers, route registration |
 | `routes/public.ts` | Public HTML pages (`/`, `/latest`, `/curacion/:date`, `/ediciones`, `/drafts/:id`) |
 | `routes/api.ts` | JSON API, authenticated write endpoints, drafts, versions, diff, uploads |
 | `lib/app-deps.ts` | Shared dependency type for route registration |
@@ -136,7 +136,10 @@ Abstracts all file-system operations:
 
 ### `app.ts`
 
-- Global security headers middleware
+- Global security headers middleware (CSP, `X-Frame-Options`, `Referrer-Policy`, HSTS on HTTPS)
+- Selective gzip compression — skips `/api/*`, `/health`, `/ready`
+- Global `app.onError()` — logs via `logEvent("app.unhandled_error")`; returns JSON for `/api/*`, plain text for public routes
+- Global `app.notFound()` — returns JSON 404 for `/api/*`, plain text for public routes
 - Static handling for `/static/*` and `/static/uploads/*` with correct MIME types and immutable caching
 - `GET /health` — uptime, file totals, cache stats, metrics, and rate-limiter snapshot
 - `GET /health/internal` — authenticated health endpoint with effective config
@@ -191,10 +194,11 @@ Abstracts all file-system operations:
 
 - All responses receive `X-Frame-Options: DENY`, `X-Content-Type-Options: nosniff`, `Referrer-Policy`, and `Content-Security-Policy`
 - `Strict-Transport-Security` is only sent when `SITE_URL` starts with `https://`
+- Global `app.onError()` and `app.notFound()` handle uncaught errors and unmatched routes; API paths get JSON, public paths get plain text
 - Public edition pages and API reads use conditional caching helpers (`ETag`, `Last-Modified`)
 - Search and authenticated mutation endpoints are rate-limited in memory by client IP
 - Write routes are disabled when `API_KEY` is not configured
-- The app is private: pages include `noindex, nofollow`, and `/robots.txt` blocks crawlers
+- The app is private: pages include `noindex, nofollow`, `<meta name="description">`, and `/robots.txt` blocks crawlers
 - Link rendering rejects unsafe protocols (`javascript:`, `data:`, `vbscript:`) and escapes raw HTML to prevent stored XSS
 
 ## Client-side and assets
