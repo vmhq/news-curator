@@ -135,7 +135,7 @@ export function validateCurationContent(content: string): CurationValidationResu
   }
 
   if (/<script[\s>]/i.test(content) || /on\w+=["']/i.test(content)) {
-    pushIssue(warnings, "warning", "raw_html_detected", "Se detectó HTML potencialmente riesgoso; será escapado al renderizar.");
+    pushIssue(errors, "error", "raw_html_detected", "Se detectó HTML potencialmente riesgoso (<script> o event handlers inline). Elimínalo antes de publicar.");
   }
 
   return {

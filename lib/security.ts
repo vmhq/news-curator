@@ -8,7 +8,7 @@ const dnsCache = new Map<string, { blocked: boolean; expiresAt: number }>();
 
 function isBlockedHost(host: string): boolean {
   const h = host.toLowerCase().replace(/^\[|\]$/g, "");
-  if (h === "localhost" || h === "127.0.0.1" || h === "0.0.0.0") return true;
+  if (h === "localhost" || h.startsWith("127.") || h === "0.0.0.0") return true;
   if (h.startsWith("10.") || h.startsWith("192.168.")) return true;
   if (/^172\.(1[6-9]|2\d|3[01])\./.test(h)) return true;
   if (h.startsWith("169.254.")) return true;
